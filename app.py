@@ -49,14 +49,14 @@ if 'Year' in df_scores.columns:
 else:
     df_scores['Year_Clean'] = ""
 
-# Recherche souple de la colonne de semaine (Wk ou Week)
 wk_col_candidates = [c for c in df_scores.columns if 'wk' in c.lower() or 'week' in c.lower()]
 if wk_col_candidates:
     df_scores['Wk_Clean'] = pd.to_numeric(df_scores[wk_col_candidates[0]], errors='coerce').fillna(0).astype(int).astype(str)
 else:
     df_scores['Wk_Clean'] = ""
 
-# Sécurité pour la colonne WinLose
+season_col = next((c for c in df_scores.columns if 'season' in c.lower() and 'playoff' in c.lower() or c.lower() in ['season vs.', 'season vs']), None)
+
 if 'WinLose' not in df_scores.columns:
     df_scores['WinLose'] = df_scores.apply(
         lambda r: 'W' if r['Offense'] > r['Defense'] else ('L' if r['Offense'] < r['Defense'] else 'T'), axis=1
@@ -81,9 +81,10 @@ if 'Year' in df_awards.columns:
 
 
 # Navigation par onglets
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📊 Scores & Matchups", 
     "⚔️ Face-à-Face", 
+    "👤 Profils Managers",
     "⭐ GameCenter (Joueurs)", 
     "🏆 Trophées & Awards"
 ])
@@ -161,9 +162,6 @@ with tab1:
     
     df_display_scores = df_filtered_scores.copy()
     df_display_scores['Result'] = df_display_scores['WinLose'].map({'W': '🟢 WIN', 'L': '🔴 LOSS', 'T': '⚪ TIE'}).fillna(df_display_scores['WinLose'])
-    
-    # Recherche dynamique de la colonne de phase de saison
-    season_col = next((c for c in df_display_scores.columns if 'season' in c.lower() and 'playoff' in c.lower() or c.lower() == 'season vs.'), None)
     
     rename_dict_scores = {
         'Year_Clean': 'Saison',
@@ -274,8 +272,142 @@ with tab2:
                     hide_index=True
                 )
 
-# --- ONGLET 3 : GAMECENTER ---
+# --- ONGLET 3 : PROFILS MANAGERS ---
 with tab3:
+    st.header("👤 Profil & CV de Manager")
+    
+    managers_list_prof = sorted([str(m) for m in df_scores['Manager'].dropna().unique() if str(m).strip() not in ["", "nan"]])
+    selected_prof = st.selectbox("Sélectionner un Manager :", managers_list_prof, key="prof_manager_select")
+    
+    m_scores = df_scores[(df_scores['Manager'].astype(str) == selected_prof) & (df_scores['Offense'] > 0)].copy()
+    
+    if m_scores.empty:
+        st.info("Aucune statistique enregistrée pour ce manager.")
+    else:
+        wins = len(m_scores[m_scores['WinLose'] == 'W'])
+        losses = len(m_scores[m_scores['WinLose'] == 'L'])
+        ties = len(m_scores[m_scores['WinLose'] == 'T'])
+        total_games = len(m_scores)
+        win_pct = (wins / total_games * 100) if total_games > 0 else 0
+        
+        total_pts = m_scores['Offense'].sum()
+        avg_pts = m_scores['Offense'].mean()
+        
+        best_week = m_scores.loc[m_scores['Offense'].idxmax()]
+        worst_week = m_scores.loc[m_scores['Offense'].idxmin()]
+        
+        col_p1, col_p2, col_p3, col_p4 = st.columns(4)
+        
+        col_p1.metric(
+            label="Bilan All-Time",
+            value=f"{wins}W - {losses}L" + (f" - {ties}T" if ties > 0 else ""),
+            delta=f"{win_pct:.1f}% de victoires",
+            delta_color="normal" if win_pct >= 50 else "inverse"
+        )
+        
+        col_p2.metric(
+            label="Moyenne Points / Match",
+            value=f"{avg_pts:.2f} pts",
+            delta=f"Total: {total_pts:.1f} pts",
+            delta_color="off"
+        )
+        
+        col_p3.metric(
+            label="Meilleure Semaine",
+            value=f"{best_week['Offense']:.2f} pts",
+            delta=f"{best_week['Year_Clean']} Wk {best_week.get('Wk_Clean', '')}",
+            delta_color="normal"
+        )
+        
+        col_p4.metric(
+            label="Pire Semaine",
+            value=f"{worst_week['Offense']:.2f} pts",
+            delta=f"{worst_week['Year_Clean']} Wk {worst_week.get('Wk_Clean', '')}",
+            delta_color="inverse"
+        )
+        
+        st.markdown("---")
+        
+        # Section Armoire à Trophées
+        st.subheader("🏆 Armoire à Trophées & Récompenses")
+        m_awards = df_awards[df_awards['Player'].astype(str) == selected_prof].copy()
+        
+        if not m_awards.empty:
+            df_disp_m_awards = m_awards.copy()
+            award_cols = ['OPOY', 'DPOY', 'COY', 'WorM', 'TOY', 'Playoffs', 'PxC']
+            for col in award_cols:
+                if col in df_disp_m_awards.columns:
+                    df_disp_m_awards[col] = df_disp_m_awards[col].apply(lambda x: "🏆" if str(x).strip() in ['1', '1.0'] else "-")
+                    
+            def format_rank(val):
+                if pd.isna(val) or str(val).strip() in ['', 'nan', '0', '0.0']:
+                    return "-"
+                try:
+                    r = int(float(val))
+                    if r == 1: return "🥇 1er"
+                    if r == 2: return "🥈 2ème"
+                    if r == 3: return "🥉 3ème"
+                    return f"{r}ème"
+                except:
+                    return str(val)
+
+            if 'Playoffs Rank' in df_disp_m_awards.columns:
+                df_disp_m_awards['Playoffs Rank'] = df_disp_m_awards['Playoffs Rank'].apply(format_rank)
+            if 'Reg Season Rank' in df_disp_m_awards.columns:
+                df_disp_m_awards['Reg Season Rank'] = df_disp_m_awards['Reg Season Rank'].apply(format_rank)
+
+            rename_awards_prof = {
+                'Year_Clean': 'Saison',
+                'Playoffs Rank': 'Rang Playoffs',
+                'Reg Season Rank': 'Rang Reg. Season',
+                'OPOY': 'OPOY 🏈',
+                'DPOY': 'DPOY 🛡️',
+                'COY': 'COY 🧢',
+                'WorM': 'WorM 🪱',
+                'TOY': 'TOY 🪖',
+                'Playoffs': 'Playoffs 🎟️',
+                'PxC': 'PxC 🎯'
+            }
+            
+            cols_awards_prof = [c for c in ['Year_Clean', 'Playoffs Rank', 'Reg Season Rank', 'OPOY', 'DPOY', 'COY', 'WorM', 'TOY', 'Playoffs', 'PxC'] if c in df_disp_m_awards.columns]
+            df_disp_m_awards = df_disp_m_awards[cols_awards_prof].rename(columns=rename_awards_prof)
+            
+            st.dataframe(df_disp_m_awards, use_container_width=True, hide_index=True)
+        else:
+            st.info("Aucun trophée ou classement répertorié dans l'onglet Awards pour ce manager.")
+            
+        st.markdown("---")
+        
+        # Section Bilan par Saison
+        st.subheader("📈 Bilan Saison par Saison")
+        saison_summary = m_scores.groupby('Year_Clean').agg(
+            Matchs=('WinLose', 'count'),
+            Victoires=('WinLose', lambda x: (x == 'W').sum()),
+            Défaites=('WinLose', lambda x: (x == 'L').sum()),
+            Nuls=('WinLose', lambda x: (x == 'T').sum()),
+            Total_Points=('Offense', 'sum'),
+            Moyenne_Points=('Offense', 'mean')
+        ).reset_index().rename(columns={
+            'Year_Clean': 'Saison',
+            'Total_Points': 'Total Pts Marqués',
+            'Moyenne_Points': 'Moyenne Pts/Match'
+        })
+        
+        saison_summary['% Victoires'] = (saison_summary['Victoires'] / saison_summary['Matchs'] * 100).map("{:.1f}%".format)
+        saison_summary = saison_summary.sort_values(by='Saison', ascending=False)
+        
+        st.dataframe(
+            saison_summary[['Saison', 'Matchs', 'Victoires', 'Défaites', 'Nuls', '% Victoires', 'Total Pts Marqués', 'Moyenne Pts/Match']],
+            use_container_width=True,
+            column_config={
+                "Total Pts Marqués": st.column_config.NumberColumn(format="%.2f"),
+                "Moyenne Pts/Match": st.column_config.NumberColumn(format="%.2f"),
+            },
+            hide_index=True
+        )
+
+# --- ONGLET 4 : GAMECENTER ---
+with tab4:
     st.header("Performances Individuelles des Joueurs")
     
     col1, col2 = st.columns(2)
@@ -317,8 +449,8 @@ with tab3:
         hide_index=True
     )
 
-# --- ONGLET 4 : AWARDS ---
-with tab4:
+# --- ONGLET 5 : AWARDS ---
+with tab5:
     st.header("Palmarès & Récompenses")
     
     years_awards_list = sorted([y for y in df_awards['Year_Clean'].unique() if y != "0"], reverse=True)
