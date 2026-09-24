@@ -413,9 +413,20 @@ with tab4:
     valid_scores_rec['Combine_Calc'] = valid_scores_rec['Offense'] + valid_scores_rec['Defense']
     valid_scores_rec['Delta_Calc'] = (valid_scores_rec['Offense'] - valid_scores_rec['Defense']).abs()
     
+    # Création d'un identifiant de match unique pour dédoublonner (Manager A vs Manager B = même match)
+    def make_match_id(r):
+        teams = sorted([str(r['Manager']).strip(), str(r['Opponent']).strip()])
+        return f"{r['Year_Clean']}_{r['Wk_Clean']}_{teams[0]}_vs_{teams[1]}"
+        
+    valid_scores_rec['Match_ID'] = valid_scores_rec.apply(make_match_id, axis=1)
+    
+    # On filtre les rencontres uniques (du point de vue du manager qui a marqué le plus, ou 1st row if Tie)
+    winners_df = valid_scores_rec[valid_scores_rec['Offense'] >= valid_scores_rec['Defense']].copy()
+    winners_df = winners_df.drop_duplicates(subset=['Match_ID'])
+    
     rec_tab1, rec_tab2, rec_tab3, rec_tab4 = st.tabs([
         "🔥 Scores Extrêmes", 
-        "🚀 Écarts & Blowouts", 
+        "🚀 Blowouts & Suspense", 
         "💥 Combines (Total Match)", 
         "⭐ Tops Joueurs NFL"
     ])
@@ -429,9 +440,9 @@ with tab4:
             top_scores = valid_scores_rec.sort_values(by='Offense', ascending=False).head(10).copy()
             top_scores['Result'] = top_scores['WinLose'].map({'W': '🟢 WIN', 'L': '🔴 LOSS', 'T': '⚪ TIE'})
             
-            show_cols_hof = ['Year_Clean', 'Wk_Clean', 'Manager', 'Offense', 'Opponent', 'Result']
+            show_cols_hof = ['Offense', 'Manager', 'Opponent', 'Year_Clean', 'Wk_Clean', 'Result']
             top_scores_disp = top_scores[[c for c in show_cols_hof if c in top_scores.columns]].rename(columns={
-                'Year_Clean': 'Saison', 'Wk_Clean': 'Semaine', 'Offense': 'Score', 'Opponent': 'Adversaire', 'Result': 'Résultat'
+                'Offense': 'Score', 'Manager': 'Manager', 'Opponent': 'Adversaire', 'Year_Clean': 'Saison', 'Wk_Clean': 'Semaine', 'Result': 'Résultat'
             })
             st.dataframe(top_scores_disp, use_container_width=True, hide_index=True, column_config={"Score": st.column_config.NumberColumn(format="%.2f")})
             
@@ -440,60 +451,55 @@ with tab4:
             flop_scores = valid_scores_rec.sort_values(by='Offense', ascending=True).head(10).copy()
             flop_scores['Result'] = flop_scores['WinLose'].map({'W': '🟢 WIN', 'L': '🔴 LOSS', 'T': '⚪ TIE'})
             
-            show_cols_hos = ['Year_Clean', 'Wk_Clean', 'Manager', 'Offense', 'Opponent', 'Result']
+            show_cols_hos = ['Offense', 'Manager', 'Opponent', 'Year_Clean', 'Wk_Clean', 'Result']
             flop_scores_disp = flop_scores[[c for c in show_cols_hos if c in flop_scores.columns]].rename(columns={
-                'Year_Clean': 'Saison', 'Wk_Clean': 'Semaine', 'Offense': 'Score', 'Opponent': 'Adversaire', 'Result': 'Résultat'
+                'Offense': 'Score', 'Manager': 'Manager', 'Opponent': 'Adversaire', 'Year_Clean': 'Saison', 'Wk_Clean': 'Semaine', 'Result': 'Résultat'
             })
             st.dataframe(flop_scores_disp, use_container_width=True, hide_index=True, column_config={"Score": st.column_config.NumberColumn(format="%.2f")})
 
-    # 2. ÉCARTS & BLOWOUTS
+    # 2. BLOWOUTS & SUSPENSE
     with rec_tab2:
         col_blow, col_tight = st.columns(2)
         
         with col_blow:
-            st.subheader("🚀 Top 10 Plus Gros Écarts (Blowouts)")
-            top_blowouts = valid_scores_rec.sort_values(by='Delta_Calc', ascending=False).head(10).copy()
-            top_blowouts['Result'] = top_blowouts['WinLose'].map({'W': '🟢 WIN', 'L': '🔴 LOSS', 'T': '⚪ TIE'})
+            st.subheader("🚀 Top 10 Blowouts (Plus Gros Écarts)")
+            top_blowouts = winners_df.sort_values(by='Delta_Calc', ascending=False).head(10).copy()
             
-            show_cols_blow = ['Year_Clean', 'Wk_Clean', 'Manager', 'Offense', 'Defense', 'Opponent', 'Delta_Calc']
+            show_cols_blow = ['Delta_Calc', 'Manager', 'Offense', 'Opponent', 'Defense', 'Year_Clean', 'Wk_Clean']
             top_blow_disp = top_blowouts[[c for c in show_cols_blow if c in top_blowouts.columns]].rename(columns={
-                'Year_Clean': 'Saison', 'Wk_Clean': 'Semaine', 'Offense': 'Pts Vainqueur', 'Defense': 'Pts Vaincu', 'Opponent': 'Adversaire', 'Delta_Calc': 'Écart'
+                'Delta_Calc': 'Écart', 'Manager': 'Vainqueur', 'Offense': 'Pts Vainqueur', 'Opponent': 'Adversaire', 'Defense': 'Pts Adversaire', 'Year_Clean': 'Saison', 'Wk_Clean': 'Semaine'
             })
             st.dataframe(top_blow_disp, use_container_width=True, hide_index=True, column_config={
+                "Écart": st.column_config.NumberColumn(format="%.2f"),
                 "Pts Vainqueur": st.column_config.NumberColumn(format="%.2f"),
-                "Pts Vaincu": st.column_config.NumberColumn(format="%.2f"),
-                "Écart": st.column_config.NumberColumn(format="%.2f")
+                "Pts Adversaire": st.column_config.NumberColumn(format="%.2f")
             })
 
         with col_tight:
-            st.subheader("🔍 Top 10 Victoires les plus Serrées (Hors Tie)")
-            strict_deltas_rec = valid_scores_rec[valid_scores_rec['Delta_Calc'] > 0.001]
-            top_tight = strict_deltas_rec.sort_values(by='Delta_Calc', ascending=True).head(10).copy()
+            st.subheader("🔍 Top 10 Suspense (Macho Serrés & Ties)")
+            top_tight = winners_df.sort_values(by='Delta_Calc', ascending=True).head(10).copy()
             
-            show_cols_tight = ['Year_Clean', 'Wk_Clean', 'Manager', 'Offense', 'Defense', 'Opponent', 'Delta_Calc']
+            show_cols_tight = ['Delta_Calc', 'Manager', 'Offense', 'Opponent', 'Defense', 'Year_Clean', 'Wk_Clean']
             top_tight_disp = top_tight[[c for c in show_cols_tight if c in top_tight.columns]].rename(columns={
-                'Year_Clean': 'Saison', 'Wk_Clean': 'Semaine', 'Offense': 'Pts Manager', 'Defense': 'Pts Adv.', 'Opponent': 'Adversaire', 'Delta_Calc': 'Écart'
+                'Delta_Calc': 'Écart', 'Manager': 'Manager / Vainqueur', 'Offense': 'Pts M1', 'Opponent': 'Adversaire', 'Defense': 'Pts M2', 'Year_Clean': 'Saison', 'Wk_Clean': 'Semaine'
             })
             st.dataframe(top_tight_disp, use_container_width=True, hide_index=True, column_config={
-                "Pts Manager": st.column_config.NumberColumn(format="%.2f"),
-                "Pts Adv.": st.column_config.NumberColumn(format="%.2f"),
-                "Écart": st.column_config.NumberColumn(format="%.2f")
+                "Écart": st.column_config.NumberColumn(format="%.2f"),
+                "Pts M1": st.column_config.NumberColumn(format="%.2f"),
+                "Pts M2": st.column_config.NumberColumn(format="%.2f")
             })
 
     # 3. COMBINES
     with rec_tab3:
         col_comb_max, col_comb_min = st.columns(2)
         
-        # Éliminer les doublons de matchs pour les combines (A vs B est le même match que B vs A)
-        unique_matches = valid_scores_rec.drop_duplicates(subset=['Year_Clean', 'Wk_Clean', 'Combine_Calc']).copy()
-        
         with col_comb_max:
             st.subheader("🔥 Top 10 Plus Gros Combines (Matchs Mitraillettes)")
-            top_combines_max = unique_matches.sort_values(by='Combine_Calc', ascending=False).head(10).copy()
+            top_combines_max = winners_df.sort_values(by='Combine_Calc', ascending=False).head(10).copy()
             
-            show_cols_cmax = ['Year_Clean', 'Wk_Clean', 'Manager', 'Offense', 'Defense', 'Opponent', 'Combine_Calc']
+            show_cols_cmax = ['Combine_Calc', 'Manager', 'Offense', 'Opponent', 'Defense', 'Year_Clean', 'Wk_Clean']
             top_cmax_disp = top_combines_max[[c for c in show_cols_cmax if c in top_combines_max.columns]].rename(columns={
-                'Year_Clean': 'Saison', 'Wk_Clean': 'Semaine', 'Manager': 'Équipe 1', 'Offense': 'Pts E1', 'Defense': 'Pts E2', 'Opponent': 'Équipe 2', 'Combine_Calc': 'Total Match'
+                'Combine_Calc': 'Total Match', 'Manager': 'Équipe 1', 'Offense': 'Pts E1', 'Opponent': 'Équipe 2', 'Defense': 'Pts E2', 'Year_Clean': 'Saison', 'Wk_Clean': 'Semaine'
             })
             st.dataframe(top_cmax_disp, use_container_width=True, hide_index=True, column_config={
                 "Total Match": st.column_config.NumberColumn(format="%.2f"),
@@ -503,11 +509,11 @@ with tab4:
             
         with col_comb_min:
             st.subheader("🧊 Top 10 Plus Faibles Combines (Purges Offensives)")
-            top_combines_min = unique_matches.sort_values(by='Combine_Calc', ascending=True).head(10).copy()
+            top_combines_min = winners_df.sort_values(by='Combine_Calc', ascending=True).head(10).copy()
             
-            show_cols_cmin = ['Year_Clean', 'Wk_Clean', 'Manager', 'Offense', 'Defense', 'Opponent', 'Combine_Calc']
+            show_cols_cmin = ['Combine_Calc', 'Manager', 'Offense', 'Opponent', 'Defense', 'Year_Clean', 'Wk_Clean']
             top_cmin_disp = top_combines_min[[c for c in show_cols_cmin if c in top_combines_min.columns]].rename(columns={
-                'Year_Clean': 'Saison', 'Wk_Clean': 'Semaine', 'Manager': 'Équipe 1', 'Offense': 'Pts E1', 'Defense': 'Pts E2', 'Opponent': 'Équipe 2', 'Combine_Calc': 'Total Match'
+                'Combine_Calc': 'Total Match', 'Manager': 'Équipe 1', 'Offense': 'Pts E1', 'Opponent': 'Équipe 2', 'Defense': 'Pts E2', 'Year_Clean': 'Saison', 'Wk_Clean': 'Semaine'
             })
             st.dataframe(top_cmin_disp, use_container_width=True, hide_index=True, column_config={
                 "Total Match": st.column_config.NumberColumn(format="%.2f"),
@@ -521,9 +527,9 @@ with tab4:
         if not df_gamecenter.empty and 'Fantasy Points' in df_gamecenter.columns:
             top_players = df_gamecenter.sort_values(by='Fantasy Points', ascending=False).head(20).copy()
             
-            show_cols_p = ['Year_Clean', 'Week_Clean', 'Player', 'POS', 'Manager', 'Fantasy Points', 'Stats']
+            show_cols_p = ['Player', 'POS', 'Fantasy Points', 'Manager', 'Year_Clean', 'Week_Clean', 'Stats']
             top_players_disp = top_players[[c for c in show_cols_p if c in top_players.columns]].rename(columns={
-                'Year_Clean': 'Saison', 'Week_Clean': 'Semaine', 'Player': 'Joueur', 'POS': 'POS', 'Manager': 'Manager Fantasy', 'Fantasy Points': 'Pts Fantasy', 'Stats': 'Ligne de Stat'
+                'Player': 'Joueur', 'POS': 'POS', 'Fantasy Points': 'Pts Fantasy', 'Manager': 'Manager Fantasy', 'Year_Clean': 'Saison', 'Week_Clean': 'Semaine', 'Stats': 'Ligne de Stat'
             })
             st.dataframe(top_players_disp, use_container_width=True, hide_index=True, column_config={
                 "Pts Fantasy": st.column_config.NumberColumn(format="%.2f pts")
