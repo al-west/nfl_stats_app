@@ -24,6 +24,11 @@ def load_data():
     # 3. Onglet Awards (Colonnes A à K -> 0 à 10)
     df_awards = pd.read_excel(file_path, sheet_name="Awards", usecols=range(11))
     
+    # Nettoyage des espaces invisibles dans les entêtes
+    df_scores.columns = df_scores.columns.astype(str).str.strip()
+    df_gamecenter.columns = df_gamecenter.columns.astype(str).str.strip()
+    df_awards.columns = df_awards.columns.astype(str).str.strip()
+    
     return df_scores, df_gamecenter, df_awards
 
 # Chargement
@@ -35,7 +40,6 @@ except Exception as e:
     st.stop()
 
 # Nettoyage et typage préventif
-# --- SCORES ---
 for col in ['Offense', 'Defense', 'Delta', 'Combine']:
     if col in df_scores.columns:
         df_scores[col] = pd.to_numeric(df_scores[col], errors='coerce')
@@ -47,6 +51,12 @@ else:
 
 if 'Wk' in df_scores.columns:
     df_scores['Wk_Clean'] = pd.to_numeric(df_scores['Wk'], errors='coerce').fillna(0).astype(int).astype(str)
+
+# Sécurité pour la colonne WinLose
+if 'WinLose' not in df_scores.columns:
+    df_scores['WinLose'] = df_scores.apply(
+        lambda r: 'W' if r['Offense'] > r['Defense'] else ('L' if r['Offense'] < r['Defense'] else 'T'), axis=1
+    )
 
 # --- GAMECENTER ---
 if 'Fantasy Points' in df_gamecenter.columns:
@@ -75,7 +85,6 @@ tab1, tab2, tab3, tab4 = st.tabs([
 with tab1:
     st.header("Historique des Scores & Matchups")
     
-    # Filtrage des vrais matchs joués pour les KPIs (Offense > 0 et Defense > 0)
     valid_games = df_scores[(df_scores['Offense'] > 0) & (df_scores['Defense'] > 0)].copy()
     
     if not valid_games.empty:
@@ -120,7 +129,7 @@ with tab1:
             delta_color="normal"
         )
         
-        # 5. Plus petit Écart (Hors Tie parfait)
+        # 5. Plus petit Écart
         strict_deltas = valid_games[valid_games['Delta_Calc'] > 0.001]
         if not strict_deltas.empty:
             min_delta_row = strict_deltas.loc[strict_deltas['Delta_Calc'].idxmin()]
@@ -133,10 +142,9 @@ with tab1:
 
     st.markdown("---")
 
-    # Filtres interactifs
     col1, col2 = st.columns(2)
     with col1:
-        managers = ["Tous"] + sorted([str(m) for m in df_scores['Manager'].dropna().unique() if str(m).strip() != ""])
+        managers = ["Tous"] + sorted([str(m) for m in df_scores['Manager'].dropna().unique() if str(m).strip() not in ["", "nan"]])
         selected_manager = st.selectbox("Filtrer par Manager :", managers)
     with col2:
         years_list = sorted([y for y in df_scores['Year_Clean'].unique() if y != "0"], reverse=True)
@@ -149,11 +157,9 @@ with tab1:
     if selected_year != "Toutes":
         df_filtered_scores = df_filtered_scores[df_filtered_scores['Year_Clean'] == selected_year]
     
-    # Formatage d'affichage pour Scores
     df_display_scores = df_filtered_scores.copy()
     
-    if 'Winl' in df_display_scores.columns:
-        df_display_scores['Result'] = df_display_scores['Winl'].map({'W': '🟢 WIN', 'L': '🔴 LOSS', 'T': '⚪ TIE'}).fillna(df_display_scores['Winl'])
+    df_display_scores['Result'] = df_display_scores['WinLose'].map({'W': '🟢 WIN', 'L': '🔴 LOSS', 'T': '⚪ TIE'}).fillna(df_display_scores['WinLose'])
     
     rename_dict_scores = {
         'Year_Clean': 'Saison',
@@ -188,7 +194,7 @@ with tab1:
 with tab2:
     st.header("⚔️ Comparateur Face-à-Face / Rivalités")
     
-    managers_list_h2h = sorted([str(m) for m in df_scores['Manager'].dropna().unique() if str(m).strip() != ""])
+    managers_list_h2h = sorted([str(m) for m in df_scores['Manager'].dropna().unique() if str(m).strip() not in ["", "nan"]])
     
     if len(managers_list_h2h) >= 2:
         col_m1, col_m2 = st.columns(2)
@@ -206,9 +212,9 @@ with tab2:
             if h2h_df.empty:
                 st.info(f"Aucun affrontement enregistré dans l'historique entre **{m1}** et **{m2}**.")
             else:
-                wins_m1 = len(h2h_df[h2h_df['Winl'] == 'W'])
-                wins_m2 = len(h2h_df[h2h_df['Winl'] == 'L'])
-                ties_h2h = len(h2h_df[h2h_df['Winl'] == 'T'])
+                wins_m1 = len(h2h_df[h2h_df['WinLose'] == 'W'])
+                wins_m2 = len(h2h_df[h2h_df['WinLose'] == 'L'])
+                ties_h2h = len(h2h_df[h2h_df['WinLose'] == 'T'])
                 avg_m1 = h2h_df['Offense'].mean()
                 avg_m2 = h2h_df['Defense'].mean()
                 
@@ -221,7 +227,7 @@ with tab2:
                 mc2.metric(f"Moyenne {m1}", f"{avg_m1:.2f} pts")
                 mc3.metric(f"Moyenne {m2}", f"{avg_m2:.2f} pts")
                 
-                m1_wins_df = h2h_df[h2h_df['Winl'] == 'W']
+                m1_wins_df = h2h_df[h2h_df['WinLose'] == 'W']
                 if not m1_wins_df.empty:
                     best_win_m1 = m1_wins_df.loc[m1_wins_df['Delta_Abs'].idxmax()]
                     mc4.metric(
@@ -236,7 +242,7 @@ with tab2:
                 st.subheader("Historique des Confrontations Directes")
                 
                 h2h_display = h2h_df.copy()
-                h2h_display['Result'] = h2h_display['Winl'].map({'W': f'🟢 {m1}', 'L': f'🔴 {m2}', 'T': '⚪ TIE'}).fillna(h2h_display['Winl'])
+                h2h_display['Result'] = h2h_display['WinLose'].map({'W': f'🟢 {m1}', 'L': f'🔴 {m2}', 'T': '⚪ TIE'}).fillna(h2h_display['WinLose'])
                 
                 rename_h2h = {
                     'Year_Clean': 'Saison',
@@ -268,7 +274,7 @@ with tab3:
     
     col1, col2 = st.columns(2)
     with col1:
-        pos_list = ["Toutes"] + sorted([str(p) for p in df_gamecenter['POS'].dropna().unique() if str(p).strip() != ""])
+        pos_list = ["Toutes"] + sorted([str(p) for p in df_gamecenter['POS'].dropna().unique() if str(p).strip() not in ["", "nan"]])
         selected_pos = st.selectbox("Filtrer par Position (POS) :", pos_list)
     with col2:
         player_search = st.text_input("Rechercher un joueur (ex: M. Ryan) :")
