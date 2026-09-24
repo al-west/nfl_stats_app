@@ -558,7 +558,7 @@ with tab5:
     with gc_col4:
         player_search = st.text_input("Rechercher un joueur :", placeholder="ex: M. Ryan")
         
-    # Base filtrée pour les KPIs (Manager, Saison, Recherche - sans restreindre par position pour conserver toutes les cartes)
+    # Base filtrée pour les KPIs (recherche, manager, saison)
     df_kpi_base = df_gamecenter.dropna(subset=['Fantasy Points']).copy()
     
     if selected_gc_manager != "Tous":
@@ -568,8 +568,9 @@ with tab5:
     if player_search:
         df_kpi_base = df_kpi_base[df_kpi_base['Player'].astype(str).str.contains(player_search, case=False, na=False)]
         
-    # Top Metrics Joueurs ajustées dynamiquement par position (6 cartes)
     if not df_kpi_base.empty:
+        # SECTION 1 : RECORDS SUR 1 MATCH
+        st.subheader("⚡ Record sur 1 Match")
         gc_c1, gc_c2, gc_c3, gc_c4, gc_c5, gc_c6 = st.columns(6)
         
         positions_kpi = [
@@ -603,6 +604,42 @@ with tab5:
             else:
                 col.metric(label=label, value="-", delta="Aucune donnée", delta_color="off")
 
+        # SECTION 2 : TOTAUX CUMULÉS DE POINTS
+        st.subheader("📊 Totaux Cumulés de Points")
+        tot_c1, tot_c2, tot_c3, tot_c4, tot_c5, tot_c6 = st.columns(6)
+        
+        positions_tot_kpi = [
+            ("🎯 Cumul QB", "QB", tot_c1),
+            ("🏃 Cumul RB", "RB", tot_c2),
+            ("🙌 Cumul WR", "WR", tot_c3),
+            ("⚡ Cumul TE", "TE", tot_c4),
+            ("🦶 Cumul K", "K", tot_c5),
+            ("🛡️ Cumul DEF", "DEF", tot_c6)
+        ]
+        
+        for label, pos_code, col in positions_tot_kpi:
+            if pos_code == "DEF":
+                pos_df = df_kpi_base[df_kpi_base['POS'].astype(str).str.upper().isin(['DEF', 'D/ST', 'DST'])]
+            else:
+                pos_df = df_kpi_base[df_kpi_base['POS'].astype(str).str.upper() == pos_code]
+                
+            if not pos_df.empty:
+                player_totals = pos_df.groupby('Player')['Fantasy Points'].sum()
+                if not player_totals.empty:
+                    top_player_name = player_totals.idxmax()
+                    top_player_score = player_totals.max()
+                    
+                    col.metric(
+                        label=label,
+                        value=f"{top_player_score:.2f} pts",
+                        delta=f"{top_player_name}",
+                        delta_color="normal"
+                    )
+                else:
+                    col.metric(label=label, value="-", delta="Aucune donnée", delta_color="off")
+            else:
+                col.metric(label=label, value="-", delta="Aucune donnée", delta_color="off")
+
     st.markdown("---")
     
     # Application de tous les filtres pour le tableau (y compris la position)
@@ -616,7 +653,6 @@ with tab5:
     if player_search:
         df_filtered_gc = df_filtered_gc[df_filtered_gc['Player'].astype(str).str.contains(player_search, case=False, na=False)]
         
-    # Ordre historique d'origine conservé (pas de sort_values)
     df_display_gc = df_filtered_gc.copy()
     
     rename_gc = {
