@@ -70,79 +70,60 @@ tab1, tab2, tab3 = st.tabs(["📊 Scores & Matchups", "⭐ GameCenter (Joueurs)"
 with tab1:
     st.header("Historique des Scores & Matchups")
     
-    # KPIs Top Cards (6 cartes sur 2 lignes)
-    if not df_scores.empty and 'Offense' in df_scores.columns:
-        valid_offense = df_scores.dropna(subset=['Offense'])
+    # Filtrage des vrais matchs joués pour les KPIs (Offense > 0 et Defense > 0)
+    valid_games = df_scores[(df_scores['Offense'] > 0) & (df_scores['Defense'] > 0)].copy()
+    
+    if not valid_games.empty:
+        # Calculs dynamiques du combine et du delta absolu
+        valid_games['Combine_Calc'] = valid_games['Offense'] + valid_games['Defense']
+        valid_games['Delta_Calc'] = (valid_games['Offense'] - valid_games['Defense']).abs()
         
-        # Ligne 1 : Scores Extrêmes & Combine
-        r1_col1, r1_col2, r1_col3 = st.columns(3)
+        c1, c2, c3, c4, c5 = st.columns(5)
         
-        # Max Score All-Time
-        if not valid_offense.empty:
-            max_score_row = valid_offense.loc[valid_offense['Offense'].idxmax()]
-            r1_col1.metric(
-                label="💥 Record Score All-Time",
-                value=f"{max_score_row['Offense']:.2f} pts",
-                delta=f"{max_score_row['Manager']} ({max_score_row['Year_Clean']} Wk {max_score_row.get('Wk_Clean', '')})",
-                delta_color="normal"
-            )
-            
-            # Pire Score All-Time
-            min_score_row = valid_offense.loc[valid_offense['Offense'].idxmin()]
-            r1_col2.metric(
-                label="🧊 Pire Score All-Time",
-                value=f"{min_score_row['Offense']:.2f} pts",
-                delta=f"{min_score_row['Manager']} ({min_score_row['Year_Clean']} Wk {min_score_row.get('Wk_Clean', '')})",
-                delta_color="inverse"
-            )
+        # 1. Record Score
+        max_score_row = valid_games.loc[valid_games['Offense'].idxmax()]
+        c1.metric(
+            label="💥 Record Score",
+            value=f"{max_score_row['Offense']:.2f} pts",
+            delta=f"{max_score_row['Manager']} ({max_score_row['Year_Clean']} Wk {max_score_row.get('Wk_Clean', '')})",
+            delta_color="normal"
+        )
         
-        # Plus gros Combine (Total)
-        if 'Combine' in df_scores.columns and not df_scores['Combine'].isna().all():
-            max_combine_row = df_scores.dropna(subset=['Combine']).loc[df_scores['Combine'].idxmax()]
-            r1_col3.metric(
-                label="🔥 Plus gros Combine (Total Match)",
-                value=f"{max_combine_row['Combine']:.2f} pts",
-                delta=f"{max_combine_row['Manager']} vs {max_combine_row['Opponent']} ({max_combine_row['Year_Clean']})",
-                delta_color="normal"
-            )
-
-        st.write("") # Espace entre les deux lignes de KPI
+        # 2. Pire Score (Hors 0)
+        min_score_row = valid_games.loc[valid_games['Offense'].idxmin()]
+        c2.metric(
+            label="🧊 Pire Score All-Time",
+            value=f"{min_score_row['Offense']:.2f} pts",
+            delta=f"{min_score_row['Manager']} ({min_score_row['Year_Clean']} Wk {min_score_row.get('Wk_Clean', '')})",
+            delta_color="inverse"
+        )
         
-        # Ligne 2 : Écarts & Ties
-        r2_col1, r2_col2, r2_col3 = st.columns(3)
+        # 3. Plus gros Combine
+        max_combine_row = valid_games.loc[valid_games['Combine_Calc'].idxmax()]
+        c3.metric(
+            label="🔥 Plus gros Combine",
+            value=f"{max_combine_row['Combine_Calc']:.2f} pts",
+            delta=f"{max_combine_row['Manager']} vs {max_combine_row['Opponent']} ({max_combine_row['Year_Clean']})",
+            delta_color="normal"
+        )
         
-        # Plus gros écart (Blowout)
-        if 'Delta' in df_scores.columns:
-            valid_deltas = df_scores.dropna(subset=['Delta'])
-            if not valid_deltas.empty:
-                max_delta_row = valid_deltas.loc[valid_deltas['Delta'].idxmax()]
-                r2_col1.metric(
-                    label="🚀 Plus gros Écart (Blowout)",
-                    value=f"{max_delta_row['Delta']:.2f} pts",
-                    delta=f"{max_delta_row['Manager']} vs {max_delta_row['Opponent']} ({max_delta_row['Year_Clean']})",
-                    delta_color="normal"
-                )
-                
-                # Plus petit écart victoires (Delta > 0)
-                strict_deltas = valid_deltas[valid_deltas['Delta'] > 0]
-                if not strict_deltas.empty:
-                    min_delta_row = strict_deltas.loc[strict_deltas['Delta'].idxmin()]
-                    r2_col2.metric(
-                        label="🔍 Plus petit écart (Hors Tie)",
-                        value=f"{min_delta_row['Delta']:.2f} pts",
-                        delta=f"{min_delta_row['Manager']} vs {min_delta_row['Opponent']} ({min_delta_row['Year_Clean']})",
-                        delta_color="off"
-                    )
-
-            # Compteur de Ties (Égalités parfaites)
-            ties_count = len(df_scores[df_scores['Delta'] == 0])
-            # Dans la table, chaque match nul apparaît 2 fois (1 fois par manager)
-            exact_ties_matches = ties_count // 2 if ties_count > 0 else 0
-            
-            r2_col3.metric(
-                label="🤝 Égalités Parfaites (Ties)",
-                value=f"{exact_ties_matches} match(s)",
-                delta="Delta : 0.00 pts",
+        # 4. Plus gros Écart (Blowout)
+        max_delta_row = valid_games.loc[valid_games['Delta_Calc'].idxmax()]
+        c4.metric(
+            label="🚀 Plus gros Écart",
+            value=f"{max_delta_row['Delta_Calc']:.2f} pts",
+            delta=f"{max_delta_row['Manager']} vs {max_delta_row['Opponent']} ({max_delta_row['Year_Clean']})",
+            delta_color="normal"
+        )
+        
+        # 5. Plus petit Écart (Hors Tie parfait)
+        strict_deltas = valid_games[valid_games['Delta_Calc'] > 0.001]
+        if not strict_deltas.empty:
+            min_delta_row = strict_deltas.loc[strict_deltas['Delta_Calc'].idxmin()]
+            c5.metric(
+                label="🔍 Plus petit Écart",
+                value=f"{min_delta_row['Delta_Calc']:.2f} pts",
+                delta=f"{min_delta_row['Manager']} vs {min_delta_row['Opponent']} ({min_delta_row['Year_Clean']})",
                 delta_color="off"
             )
 
@@ -292,7 +273,7 @@ with tab3:
         'DPOY': 'DPOY 🛡️',
         'COY': 'COY 🧢',
         'WorM': 'WorM 🪱',
-        'TOY': 'TOY 🚽',
+        'TOY': 'TOY 🪖',
         'Playoffs': 'Playoffs 🎟️',
         'PxC': 'PxC 🎯'
     }
