@@ -41,20 +41,20 @@ tab1, tab2, tab3 = st.tabs(["📊 Scores & Matchups", "⭐ GameCenter (Joueurs)"
 with tab1:
     st.header("Historique des Scores & Matchups")
     
-    # Filtres interactifs
     col1, col2 = st.columns(2)
     with col1:
-        managers = ["Tous"] + sorted(list(df_scores['Manager'].dropna().unique()))
+        managers = ["Tous"] + sorted([str(m) for m in df_scores['Manager'].dropna().unique()])
         selected_manager = st.selectbox("Filtrer par Manager :", managers)
     with col2:
-        years = ["Toutes"] + sorted(list(df_scores['Year'].dropna().unique()), reverse=True)
+        clean_years_scores = sorted([int(y) for y in df_scores['Year'].dropna().unique() if str(y).replace('.0','').isdigit()], reverse=True)
+        years = ["Toutes"] + [str(y) for y in clean_years_scores]
         selected_year = st.selectbox("Filtrer par Saison :", years, key="scores_year")
     
     df_filtered_scores = df_scores.copy()
     if selected_manager != "Tous":
-        df_filtered_scores = df_filtered_scores[df_filtered_scores['Manager'] == selected_manager]
+        df_filtered_scores = df_filtered_scores[df_filtered_scores['Manager'].astype(str) == selected_manager]
     if selected_year != "Toutes":
-        df_filtered_scores = df_filtered_scores[df_filtered_scores['Year'] == selected_year]
+        df_filtered_scores = df_filtered_scores[df_filtered_scores['Year'].astype(str).str.replace('.0','') == selected_year]
         
     st.dataframe(df_filtered_scores, use_container_width=True)
 
@@ -64,16 +64,16 @@ with tab2:
     
     col1, col2 = st.columns(2)
     with col1:
-        pos_list = ["Toutes"] + sorted(list(df_gamecenter['POS'].dropna().unique()))
+        pos_list = ["Toutes"] + sorted([str(p) for p in df_gamecenter['POS'].dropna().unique()])
         selected_pos = st.selectbox("Filtrer par Position (POS) :", pos_list)
     with col2:
         player_search = st.text_input("Rechercher un joueur (ex: M. Ryan) :")
         
     df_filtered_gc = df_gamecenter.copy()
     if selected_pos != "Toutes":
-        df_filtered_gc = df_filtered_gc[df_filtered_gc['POS'] == selected_pos]
+        df_filtered_gc = df_filtered_gc[df_filtered_gc['POS'].astype(str) == selected_pos]
     if player_search:
-        df_filtered_gc = df_filtered_gc[df_filtered_gc['Player'].str.contains(player_search, case=False, na=False)]
+        df_filtered_gc = df_filtered_gc[df_filtered_gc['Player'].astype(str).str.contains(player_search, case=False, na=False)]
         
     st.dataframe(df_filtered_gc, use_container_width=True)
 
@@ -81,11 +81,12 @@ with tab2:
 with tab3:
     st.header("Palmarès & Récompenses")
     
-    years_awards = ["Toutes"] + sorted(list(df_awards['Year'].dropna().unique()), reverse=True)
+    clean_years_awards = sorted([int(y) for y in df_awards['Year'].dropna().unique() if str(y).replace('.0','').isdigit()], reverse=True)
+    years_awards = ["Toutes"] + [str(y) for y in clean_years_awards]
     selected_award_year = st.selectbox("Filtrer par Année :", years_awards, key="awards_year")
     
     df_filtered_awards = df_awards.copy()
     if selected_award_year != "Toutes":
-        df_filtered_awards = df_filtered_awards[df_filtered_awards['Year'] == selected_award_year]
+        df_filtered_awards = df_filtered_awards[df_filtered_awards['Year'].astype(str).str.replace('.0','') == selected_award_year]
         
     st.dataframe(df_filtered_awards, use_container_width=True)
