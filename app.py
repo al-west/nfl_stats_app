@@ -413,14 +413,12 @@ with tab4:
     valid_scores_rec['Combine_Calc'] = valid_scores_rec['Offense'] + valid_scores_rec['Defense']
     valid_scores_rec['Delta_Calc'] = (valid_scores_rec['Offense'] - valid_scores_rec['Defense']).abs()
     
-    # Création d'un identifiant de match unique pour dédoublonner (Manager A vs Manager B = même match)
     def make_match_id(r):
         teams = sorted([str(r['Manager']).strip(), str(r['Opponent']).strip()])
         return f"{r['Year_Clean']}_{r['Wk_Clean']}_{teams[0]}_vs_{teams[1]}"
         
     valid_scores_rec['Match_ID'] = valid_scores_rec.apply(make_match_id, axis=1)
     
-    # On filtre les rencontres uniques (du point de vue du manager qui a marqué le plus, ou 1st row if Tie)
     winners_df = valid_scores_rec[valid_scores_rec['Offense'] >= valid_scores_rec['Defense']].copy()
     winners_df = winners_df.drop_duplicates(subset=['Match_ID'])
     
@@ -476,7 +474,7 @@ with tab4:
             })
 
         with col_tight:
-            st.subheader("🔍 Top 10 Suspense (Macho Serrés & Ties)")
+            st.subheader("🔍 Top 10 Suspense (Matchs Serrés & Ties)")
             top_tight = winners_df.sort_values(by='Delta_Calc', ascending=True).head(10).copy()
             
             show_cols_tight = ['Delta_Calc', 'Manager', 'Offense', 'Opponent', 'Defense', 'Year_Clean', 'Wk_Clean']
@@ -537,24 +535,90 @@ with tab4:
         else:
             st.info("Données GameCenter indisponibles.")
 
-# --- ONGLET 5 : GAMECENTER ---
+# --- ONGLET 5 : GAMECENTER (JOUEURS) ---
 with tab5:
-    st.header("Performances Individuelles des Joueurs")
+    st.header("⭐ GameCenter - Performances des Joueurs")
     
-    col1, col2 = st.columns(2)
-    with col1:
+    # Filtres interactifs avancés
+    gc_col1, gc_col2, gc_col3, gc_col4 = st.columns(4)
+    
+    with gc_col1:
         pos_list = ["Toutes"] + sorted([str(p) for p in df_gamecenter['POS'].dropna().unique() if str(p).strip() not in ["", "nan"]])
-        selected_pos = st.selectbox("Filtrer par Position (POS) :", pos_list)
-    with col2:
-        player_search = st.text_input("Rechercher un joueur (ex: M. Ryan) :")
+        selected_pos = st.selectbox("Position (POS) :", pos_list)
         
+    with gc_col2:
+        gc_managers = ["Tous"] + sorted([str(m) for m in df_gamecenter['Manager'].dropna().unique() if str(m).strip() not in ["", "nan"]])
+        selected_gc_manager = st.selectbox("Manager Fantasy :", gc_managers, key="gc_manager_select")
+        
+    with gc_col3:
+        gc_years_list = sorted([y for y in df_gamecenter['Year_Clean'].unique() if y != "0"], reverse=True)
+        gc_years = ["Toutes"] + gc_years_list
+        selected_gc_year = st.selectbox("Saison :", gc_years, key="gc_year_select")
+        
+    with gc_col4:
+        player_search = st.text_input("Rechercher un joueur :", placeholder="ex: M. Ryan")
+        
+    # Base filtrée pour les KPIs (Manager, Saison, Recherche - sans restreindre par position pour conserver toutes les cartes)
+    df_kpi_base = df_gamecenter.dropna(subset=['Fantasy Points']).copy()
+    
+    if selected_gc_manager != "Tous":
+        df_kpi_base = df_kpi_base[df_kpi_base['Manager'].astype(str) == selected_gc_manager]
+    if selected_gc_year != "Toutes":
+        df_kpi_base = df_kpi_base[df_kpi_base['Year_Clean'] == selected_gc_year]
+    if player_search:
+        df_kpi_base = df_kpi_base[df_kpi_base['Player'].astype(str).str.contains(player_search, case=False, na=False)]
+        
+    # Top Metrics Joueurs ajustées dynamiquement par position (6 cartes)
+    if not df_kpi_base.empty:
+        gc_c1, gc_c2, gc_c3, gc_c4, gc_c5, gc_c6 = st.columns(6)
+        
+        positions_kpi = [
+            ("🎯 Top QB", "QB", gc_c1),
+            ("🏃 Top RB", "RB", gc_c2),
+            ("🙌 Top WR", "WR", gc_c3),
+            ("⚡ Top TE", "TE", gc_c4),
+            ("🦶 Top K", "K", gc_c5),
+            ("🛡️ Top DEF", "DEF", gc_c6)
+        ]
+        
+        for label, pos_code, col in positions_kpi:
+            if pos_code == "DEF":
+                pos_df = df_kpi_base[df_kpi_base['POS'].astype(str).str.upper().isin(['DEF', 'D/ST', 'DST'])]
+            else:
+                pos_df = df_kpi_base[df_kpi_base['POS'].astype(str).str.upper() == pos_code]
+                
+            if not pos_df.empty:
+                max_row = pos_df.loc[pos_df['Fantasy Points'].idxmax()]
+                if selected_gc_manager == "Tous":
+                    sub_text = f"{max_row['Player']} ({max_row['Manager']} - {max_row['Year_Clean']})"
+                else:
+                    sub_text = f"{max_row['Player']} ({max_row['Year_Clean']} Wk {max_row.get('Week_Clean', '')})"
+                    
+                col.metric(
+                    label=label,
+                    value=f"{max_row['Fantasy Points']:.2f} pts",
+                    delta=sub_text,
+                    delta_color="normal"
+                )
+            else:
+                col.metric(label=label, value="-", delta="Aucune donnée", delta_color="off")
+
+    st.markdown("---")
+    
+    # Application de tous les filtres pour le tableau (y compris la position)
     df_filtered_gc = df_gamecenter.copy()
     if selected_pos != "Toutes":
         df_filtered_gc = df_filtered_gc[df_filtered_gc['POS'].astype(str) == selected_pos]
+    if selected_gc_manager != "Tous":
+        df_filtered_gc = df_filtered_gc[df_filtered_gc['Manager'].astype(str) == selected_gc_manager]
+    if selected_gc_year != "Toutes":
+        df_filtered_gc = df_filtered_gc[df_filtered_gc['Year_Clean'] == selected_gc_year]
     if player_search:
         df_filtered_gc = df_filtered_gc[df_filtered_gc['Player'].astype(str).str.contains(player_search, case=False, na=False)]
         
+    # Ordre historique d'origine conservé (pas de sort_values)
     df_display_gc = df_filtered_gc.copy()
+    
     rename_gc = {
         'Year_Clean': 'Saison',
         'Week_Clean': 'Semaine',
