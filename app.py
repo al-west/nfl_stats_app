@@ -49,8 +49,12 @@ if 'Year' in df_scores.columns:
 else:
     df_scores['Year_Clean'] = ""
 
-if 'Wk' in df_scores.columns:
-    df_scores['Wk_Clean'] = pd.to_numeric(df_scores['Wk'], errors='coerce').fillna(0).astype(int).astype(str)
+# Recherche souple de la colonne de semaine (Wk ou Week)
+wk_col_candidates = [c for c in df_scores.columns if 'wk' in c.lower() or 'week' in c.lower()]
+if wk_col_candidates:
+    df_scores['Wk_Clean'] = pd.to_numeric(df_scores[wk_col_candidates[0]], errors='coerce').fillna(0).astype(int).astype(str)
+else:
+    df_scores['Wk_Clean'] = ""
 
 # Sécurité pour la colonne WinLose
 if 'WinLose' not in df_scores.columns:
@@ -65,8 +69,11 @@ if 'Fantasy Points' in df_gamecenter.columns:
 if 'Year' in df_gamecenter.columns:
     df_gamecenter['Year_Clean'] = pd.to_numeric(df_gamecenter['Year'], errors='coerce').fillna(0).astype(int).astype(str)
 
-if 'Week' in df_gamecenter.columns:
-    df_gamecenter['Week_Clean'] = pd.to_numeric(df_gamecenter['Week'], errors='coerce').fillna(0).astype(int).astype(str)
+gc_wk_candidates = [c for c in df_gamecenter.columns if 'week' in c.lower() or 'wk' in c.lower()]
+if gc_wk_candidates:
+    df_gamecenter['Week_Clean'] = pd.to_numeric(df_gamecenter[gc_wk_candidates[0]], errors='coerce').fillna(0).astype(int).astype(str)
+else:
+    df_gamecenter['Week_Clean'] = ""
 
 # --- AWARDS ---
 if 'Year' in df_awards.columns:
@@ -93,7 +100,6 @@ with tab1:
         
         c1, c2, c3, c4, c5 = st.columns(5)
         
-        # 1. Record Score
         max_score_row = valid_games.loc[valid_games['Offense'].idxmax()]
         c1.metric(
             label="💥 Record Score",
@@ -102,7 +108,6 @@ with tab1:
             delta_color="normal"
         )
         
-        # 2. Pire Score (Hors 0)
         min_score_row = valid_games.loc[valid_games['Offense'].idxmin()]
         c2.metric(
             label="🧊 Pire Score All-Time",
@@ -111,7 +116,6 @@ with tab1:
             delta_color="inverse"
         )
         
-        # 3. Plus gros Combine
         max_combine_row = valid_games.loc[valid_games['Combine_Calc'].idxmax()]
         c3.metric(
             label="🔥 Plus gros Combine",
@@ -120,7 +124,6 @@ with tab1:
             delta_color="normal"
         )
         
-        # 4. Plus gros Écart (Blowout)
         max_delta_row = valid_games.loc[valid_games['Delta_Calc'].idxmax()]
         c4.metric(
             label="🚀 Plus gros Écart",
@@ -129,7 +132,6 @@ with tab1:
             delta_color="normal"
         )
         
-        # 5. Plus petit Écart
         strict_deltas = valid_games[valid_games['Delta_Calc'] > 0.001]
         if not strict_deltas.empty:
             min_delta_row = strict_deltas.loc[strict_deltas['Delta_Calc'].idxmin()]
@@ -158,12 +160,14 @@ with tab1:
         df_filtered_scores = df_filtered_scores[df_filtered_scores['Year_Clean'] == selected_year]
     
     df_display_scores = df_filtered_scores.copy()
-    
     df_display_scores['Result'] = df_display_scores['WinLose'].map({'W': '🟢 WIN', 'L': '🔴 LOSS', 'T': '⚪ TIE'}).fillna(df_display_scores['WinLose'])
+    
+    # Recherche dynamique de la colonne de phase de saison
+    season_col = next((c for c in df_display_scores.columns if 'season' in c.lower() and 'playoff' in c.lower() or c.lower() == 'season vs.'), None)
     
     rename_dict_scores = {
         'Year_Clean': 'Saison',
-        'Season vs.': 'Phase',
+        season_col: 'Phase',
         'Wk_Clean': 'Semaine',
         'Manager': 'Manager',
         'Offense': 'Points Marqués',
@@ -174,7 +178,7 @@ with tab1:
         'Combine': 'Total Match (Combine)'
     }
     
-    cols_to_show_scores = [c for c in ['Year_Clean', 'Season vs.', 'Wk_Clean', 'Manager', 'Offense', 'Result', 'Defense', 'Opponent', 'Delta', 'Combine'] if c in df_display_scores.columns or c == 'Result']
+    cols_to_show_scores = [c for c in ['Year_Clean', season_col, 'Wk_Clean', 'Manager', 'Offense', 'Result', 'Defense', 'Opponent', 'Delta', 'Combine'] if c and c in df_display_scores.columns or c == 'Result']
     df_display_scores = df_display_scores.rename(columns=rename_dict_scores)
     show_cols = [rename_dict_scores.get(c, c) for c in cols_to_show_scores if rename_dict_scores.get(c, c) in df_display_scores.columns]
     
@@ -246,7 +250,7 @@ with tab2:
                 
                 rename_h2h = {
                     'Year_Clean': 'Saison',
-                    'Season vs.': 'Phase',
+                    season_col: 'Phase',
                     'Wk_Clean': 'Semaine',
                     'Offense': f'Pts {m1}',
                     'Result': 'Vainqueur',
@@ -254,7 +258,9 @@ with tab2:
                     'Delta_Abs': 'Écart'
                 }
                 
-                cols_h2h_show = ['Year_Clean', 'Season vs.', 'Wk_Clean', 'Offense', 'Result', 'Defense', 'Delta_Abs']
+                cols_candidates_h2h = ['Year_Clean', season_col, 'Wk_Clean', 'Offense', 'Result', 'Defense', 'Delta_Abs']
+                cols_h2h_show = [c for c in cols_candidates_h2h if c and c in h2h_display.columns]
+                
                 h2h_display = h2h_display[cols_h2h_show].rename(columns=rename_h2h)
                 
                 st.dataframe(
