@@ -64,7 +64,12 @@ if 'Year' in df_awards.columns:
 
 
 # Navigation par onglets
-tab1, tab2, tab3 = st.tabs(["📊 Scores & Matchups", "⭐ GameCenter (Joueurs)", "🏆 Trophées & Awards"])
+tab1, tab2, tab3, tab4 = st.tabs([
+    "📊 Scores & Matchups", 
+    "⚔️ Face-à-Face", 
+    "⭐ GameCenter (Joueurs)", 
+    "🏆 Trophées & Awards"
+])
 
 # --- ONGLET 1 : SCORES ---
 with tab1:
@@ -74,7 +79,6 @@ with tab1:
     valid_games = df_scores[(df_scores['Offense'] > 0) & (df_scores['Defense'] > 0)].copy()
     
     if not valid_games.empty:
-        # Calculs dynamiques du combine et du delta absolu
         valid_games['Combine_Calc'] = valid_games['Offense'] + valid_games['Defense']
         valid_games['Delta_Calc'] = (valid_games['Offense'] - valid_games['Defense']).abs()
         
@@ -148,11 +152,9 @@ with tab1:
     # Formatage d'affichage pour Scores
     df_display_scores = df_filtered_scores.copy()
     
-    # Emojis sur W/L
     if 'Winl' in df_display_scores.columns:
         df_display_scores['Result'] = df_display_scores['Winl'].map({'W': '🟢 WIN', 'L': '🔴 LOSS', 'T': '⚪ TIE'}).fillna(df_display_scores['Winl'])
     
-    # Renommage des entêtes
     rename_dict_scores = {
         'Year_Clean': 'Saison',
         'Season vs.': 'Phase',
@@ -182,8 +184,86 @@ with tab1:
         hide_index=True
     )
 
-# --- ONGLET 2 : GAMECENTER ---
+# --- ONGLET 2 : FACE-A-FACE ---
 with tab2:
+    st.header("⚔️ Comparateur Face-à-Face / Rivalités")
+    
+    managers_list_h2h = sorted([str(m) for m in df_scores['Manager'].dropna().unique() if str(m).strip() != ""])
+    
+    if len(managers_list_h2h) >= 2:
+        col_m1, col_m2 = st.columns(2)
+        with col_m1:
+            m1 = st.selectbox("Sélectionner le Manager 1 :", managers_list_h2h, index=0)
+        with col_m2:
+            default_m2_idx = 1 if len(managers_list_h2h) > 1 else 0
+            m2 = st.selectbox("Sélectionner le Manager 2 :", managers_list_h2h, index=default_m2_idx)
+            
+        if m1 == m2:
+            st.warning("Veuillez sélectionner deux managers différents pour afficher la rivalité.")
+        else:
+            h2h_df = df_scores[(df_scores['Manager'].astype(str) == m1) & (df_scores['Opponent'].astype(str) == m2) & (df_scores['Offense'] > 0)].copy()
+            
+            if h2h_df.empty:
+                st.info(f"Aucun affrontement enregistré dans l'historique entre **{m1}** et **{m2}**.")
+            else:
+                wins_m1 = len(h2h_df[h2h_df['Winl'] == 'W'])
+                wins_m2 = len(h2h_df[h2h_df['Winl'] == 'L'])
+                ties_h2h = len(h2h_df[h2h_df['Winl'] == 'T'])
+                avg_m1 = h2h_df['Offense'].mean()
+                avg_m2 = h2h_df['Defense'].mean()
+                
+                h2h_df['Delta_Abs'] = (h2h_df['Offense'] - h2h_df['Defense']).abs()
+                
+                st.markdown(f"### Bilan Global : **{m1}** `{wins_m1}` - `{wins_m2}` **{m2}**" + (f" *({ties_h2h} nul(s))* " if ties_h2h > 0 else ""))
+                
+                mc1, mc2, mc3, mc4 = st.columns(4)
+                mc1.metric("Matchs Joués", f"{len(h2h_df)}")
+                mc2.metric(f"Moyenne {m1}", f"{avg_m1:.2f} pts")
+                mc3.metric(f"Moyenne {m2}", f"{avg_m2:.2f} pts")
+                
+                m1_wins_df = h2h_df[h2h_df['Winl'] == 'W']
+                if not m1_wins_df.empty:
+                    best_win_m1 = m1_wins_df.loc[m1_wins_df['Delta_Abs'].idxmax()]
+                    mc4.metric(
+                        f"Plus grosse victoire {m1}",
+                        f"+{best_win_m1['Delta_Abs']:.2f} pts",
+                        f"{best_win_m1['Year_Clean']} Wk {best_win_m1.get('Wk_Clean', '')}"
+                    )
+                else:
+                    mc4.metric(f"Plus grosse victoire {m1}", "Aucune")
+                
+                st.markdown("---")
+                st.subheader("Historique des Confrontations Directes")
+                
+                h2h_display = h2h_df.copy()
+                h2h_display['Result'] = h2h_display['Winl'].map({'W': f'🟢 {m1}', 'L': f'🔴 {m2}', 'T': '⚪ TIE'}).fillna(h2h_display['Winl'])
+                
+                rename_h2h = {
+                    'Year_Clean': 'Saison',
+                    'Season vs.': 'Phase',
+                    'Wk_Clean': 'Semaine',
+                    'Offense': f'Pts {m1}',
+                    'Result': 'Vainqueur',
+                    'Defense': f'Pts {m2}',
+                    'Delta_Abs': 'Écart'
+                }
+                
+                cols_h2h_show = ['Year_Clean', 'Season vs.', 'Wk_Clean', 'Offense', 'Result', 'Defense', 'Delta_Abs']
+                h2h_display = h2h_display[cols_h2h_show].rename(columns=rename_h2h)
+                
+                st.dataframe(
+                    h2h_display,
+                    use_container_width=True,
+                    column_config={
+                        f"Pts {m1}": st.column_config.NumberColumn(format="%.2f"),
+                        f"Pts {m2}": st.column_config.NumberColumn(format="%.2f"),
+                        "Écart": st.column_config.NumberColumn(format="%.2f"),
+                    },
+                    hide_index=True
+                )
+
+# --- ONGLET 3 : GAMECENTER ---
+with tab3:
     st.header("Performances Individuelles des Joueurs")
     
     col1, col2 = st.columns(2)
@@ -199,7 +279,6 @@ with tab2:
     if player_search:
         df_filtered_gc = df_filtered_gc[df_filtered_gc['Player'].astype(str).str.contains(player_search, case=False, na=False)]
         
-    # Préparation affichage GameCenter
     df_display_gc = df_filtered_gc.copy()
     rename_gc = {
         'Year_Clean': 'Saison',
@@ -226,8 +305,8 @@ with tab2:
         hide_index=True
     )
 
-# --- ONGLET 3 : AWARDS ---
-with tab3:
+# --- ONGLET 4 : AWARDS ---
+with tab4:
     st.header("Palmarès & Récompenses")
     
     years_awards_list = sorted([y for y in df_awards['Year_Clean'].unique() if y != "0"], reverse=True)
@@ -240,13 +319,11 @@ with tab3:
         
     df_display_awards = df_filtered_awards.copy()
     
-    # Remplacement des 1 par des trophées 🏆
     award_cols = ['OPOY', 'DPOY', 'COY', 'WorM', 'TOY', 'Playoffs', 'PxC']
     for col in award_cols:
         if col in df_display_awards.columns:
             df_display_awards[col] = df_display_awards[col].apply(lambda x: "🏆" if str(x).strip() in ['1', '1.0'] else "-")
             
-    # Formatage des rangs avec médailles
     def format_rank(val):
         if pd.isna(val) or str(val).strip() in ['', 'nan', '0', '0.0']:
             return "-"
