@@ -256,16 +256,33 @@ with tab1:
     st.markdown("---")
     st.subheader("🍀 Indice de Chance & Poisse (Luck Index - Attaque vs. Défense Subie)")
     
-    # Graphique Scatter Plot Luck Index
-    df_luck = df_scores[df_scores['Offense'] > 0].groupby(['Manager', 'Year_Clean']).agg(
-        Pts_Marques=('Offense', 'sum'),
-        Pts_Encaisses=('Defense', 'sum'),
-        Victoires=('WinLose', lambda x: (x == 'W').sum()),
-        Defaites=('WinLose', lambda x: (x == 'L').sum()),
-        Nuls=('WinLose', lambda x: (x == 'T').sum())
-    ).reset_index()
-    
-    if not df_luck.empty:
+    # Graphique Scatter Plot Luck Index réactif aux filtres du haut
+    df_luck_base = df_scores[df_scores['Offense'] > 0].copy()
+    if selected_manager != "Tous":
+        df_luck_base = df_luck_base[df_luck_base['Manager'].astype(str) == selected_manager]
+    if selected_year != "Toutes":
+        df_luck_base = df_luck_base[df_luck_base['Year_Clean'] == selected_year]
+
+    if not df_luck_base.empty:
+        if selected_year == "Toutes":
+            df_luck = df_luck_base.groupby(['Manager', 'Year_Clean']).agg(
+                Pts_Marques=('Offense', 'sum'),
+                Pts_Encaisses=('Defense', 'sum'),
+                Victoires=('WinLose', lambda x: (x == 'W').sum()),
+                Defaites=('WinLose', lambda x: (x == 'L').sum()),
+                Nuls=('WinLose', lambda x: (x == 'T').sum())
+            ).reset_index()
+            df_luck['Label'] = df_luck['Manager'] + " (" + df_luck['Year_Clean'] + ")"
+        else:
+            df_luck = df_luck_base.groupby('Manager').agg(
+                Pts_Marques=('Offense', 'sum'),
+                Pts_Encaisses=('Defense', 'sum'),
+                Victoires=('WinLose', lambda x: (x == 'W').sum()),
+                Defaites=('WinLose', lambda x: (x == 'L').sum()),
+                Nuls=('WinLose', lambda x: (x == 'T').sum())
+            ).reset_index()
+            df_luck['Label'] = df_luck['Manager']
+
         df_luck['Record'] = df_luck.apply(
             lambda r: f"{r['Victoires']}W-{r['Defaites']}L" + (f"-{r['Nuls']}T" if r['Nuls'] > 0 else ""), axis=1
         )
@@ -277,14 +294,14 @@ with tab1:
             x='Pts_Marques',
             y='Pts_Encaisses',
             color='Manager',
-            text='Record',
-            hover_data={'Manager': True, 'Year_Clean': True, 'Record': True, 'Pts_Marques': ':.2f', 'Pts_Encaisses': ':.2f'},
+            text='Label',
+            hover_data={'Manager': True, 'Record': True, 'Pts_Marques': ':.2f', 'Pts_Encaisses': ':.2f'},
             labels={'Pts_Marques': 'Points Marqués (Attaque)', 'Pts_Encaisses': 'Points Encaissés (Défense Subie)'}
         )
-        fig_luck.add_vline(x=avg_pts_m, line_dash="dash", line_color="gray", annotation_text="Moyenne Ligue Attaque")
-        fig_luck.add_hline(y=avg_pts_e, line_dash="dash", line_color="gray", annotation_text="Moyenne Ligue Défense Subie")
-        fig_luck.update_traces(textposition='top center', marker=dict(size=10))
-        fig_luck.update_layout(height=500, margin=dict(l=40, r=40, t=30, b=40))
+        fig_luck.add_vline(x=avg_pts_m, line_dash="dash", line_color="gray", annotation_text="Moy. Pts Marqués")
+        fig_luck.add_hline(y=avg_pts_e, line_dash="dash", line_color="gray", annotation_text="Moy. Pts Encaissés")
+        fig_luck.update_traces(textposition='top center', marker=dict(size=11))
+        fig_luck.update_layout(height=480, margin=dict(l=40, r=40, t=30, b=40), template="plotly_white")
         st.plotly_chart(fig_luck, use_container_width=True)
 
 
@@ -368,57 +385,50 @@ with tab2:
                     hide_index=True
                 )
 
-    st.markdown("---")
-    st.subheader("🔥 Matrice de Rivalité Globale (Tous les Managers Historiques)")
-    
-    # Heatmap H2H globale
-    all_historical_managers = sorted([str(m) for m in df_scores['Manager'].dropna().unique() if str(m).strip() not in ["", "nan"]])
-    
-    matrix_text = []
-    matrix_pct = []
-    
-    for mgr1 in all_historical_managers:
-        row_text = []
-        row_pct = []
-        for mgr2 in all_historical_managers:
-            if mgr1 == mgr2:
-                row_text.append("-")
-                row_pct.append(np.nan)
-            else:
-                df_pair = df_scores[(df_scores['Manager'] == mgr1) & (df_scores['Opponent'] == mgr2) & (df_scores['Offense'] > 0)]
-                if df_pair.empty:
-                    row_text.append("N/A")
-                    row_pct.append(np.nan)
-                else:
-                    w = (df_pair['WinLose'] == 'W').sum()
-                    l = (df_pair['WinLose'] == 'L').sum()
-                    t = (df_pair['WinLose'] == 'T').sum()
-                    
-                    emoji = "🟢" if w > l else ("🔴" if w < l else "🤝")
-                    pct = (w + 0.5 * t) / len(df_pair) * 100
-                    txt = f"{emoji} {w}-{l}" + (f"-{t}" if t > 0 else "")
-                    
-                    row_text.append(txt)
-                    row_pct.append(pct)
-        matrix_text.append(row_text)
-        matrix_pct.append(row_pct)
+        st.markdown("---")
+        st.subheader(f"📊 Bilan H2H Global de {m1} contre chaque Adversaire")
         
-    fig_heatmap = px.imshow(
-        matrix_pct,
-        x=all_historical_managers,
-        y=all_historical_managers,
-        labels=dict(x="Adversaire", y="Manager", color="% Victoires"),
-        text_auto=False,
-        color_continuous_scale="RdYlGn",
-        aspect="auto"
-    )
-    fig_heatmap.update_traces(
-        text=matrix_text,
-        texttemplate="%{text}",
-        hovertemplate="Manager: %{y}<br>Adversaire: %{x}<br>Bilan: %{text}<extra></extra>"
-    )
-    fig_heatmap.update_layout(height=600, margin=dict(l=40, r=40, t=30, b=40))
-    st.plotly_chart(fig_heatmap, use_container_width=True)
+        # Bar Chart Horizontal H2H centré sur Manager 1
+        m1_h2h_all = df_scores[(df_scores['Manager'].astype(str) == m1) & (df_scores['Offense'] > 0)].copy()
+        
+        if not m1_h2h_all.empty:
+            summary_h2h = m1_h2h_all.groupby('Opponent').agg(
+                W=('WinLose', lambda x: (x == 'W').sum()),
+                L=('WinLose', lambda x: (x == 'L').sum()),
+                T=('WinLose', lambda x: (x == 'T').sum()),
+                Matchs=('WinLose', 'count')
+            ).reset_index()
+            
+            summary_h2h['WL_Pct'] = (summary_h2h['W'] + 0.5 * summary_h2h['T']) / summary_h2h['Matchs'] * 100
+            
+            def make_h2h_label(r):
+                emoji = "🟢" if r['W'] > r['L'] else ("🔴" if r['W'] < r['L'] else "🤝")
+                rec = f"{r['W']}-{r['L']}" + (f"-{r['T']}" if r['T'] > 0 else "")
+                return f"{emoji} {rec} ({r['WL_Pct']:.1f}%)"
+                
+            summary_h2h['Label'] = summary_h2h.apply(make_h2h_label, axis=1)
+            summary_h2h = summary_h2h.sort_values(by='WL_Pct', ascending=True)
+            
+            fig_h2h_bar = px.bar(
+                summary_h2h,
+                x='WL_Pct',
+                y='Opponent',
+                orientation='h',
+                color='WL_Pct',
+                color_continuous_scale='RdYlGn',
+                range_color=[0, 100],
+                text='Label',
+                labels={'WL_Pct': '% de Victoires (W/L)', 'Opponent': 'Adversaire'}
+            )
+            fig_h2h_bar.update_traces(textposition='inside', insidetextanchor='middle')
+            fig_h2h_bar.update_layout(
+                coloraxis_showscale=False,
+                xaxis=dict(range=[0, 100], ticksuffix="%"),
+                height=max(350, len(summary_h2h) * 45),
+                margin=dict(l=20, r=20, t=20, b=20),
+                template="plotly_white"
+            )
+            st.plotly_chart(fig_h2h_bar, use_container_width=True)
 
 
 # --- ONGLET 3 : PROFILS MANAGERS ---
@@ -586,16 +596,34 @@ with tab3:
                 else:
                     st.info("Données GameCenter indisponibles pour ce manager sur cette saison.")
 
-        # 2. SPIDER CHART / RADAR CHART
+        # 2. SPIDER CHART / RADAR CHART (Moyenne par saison par poste)
         with p_subtab2:
-            st.subheader("🕸️ Balance Positionnelle (Radar Chart - Titulaires)")
+            st.subheader("🕸️ Balance Positionnelle (Moyenne de Pts par Saison et par Poste)")
             
             pos_order = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF']
             df_starters_pos = df_gc_starters[df_gc_starters['POS_Clean'].isin(pos_order)].copy()
             
             if not df_starters_pos.empty:
-                pos_totals = df_starters_pos.groupby(['Manager', 'POS_Clean'])['Fantasy Points'].sum().reset_index()
-                pivot_pos = pos_totals.pivot(index='Manager', columns='POS_Clean', values='Fantasy Points').fillna(0)
+                col_r1, col_r2 = st.columns(2)
+                with col_r1:
+                    all_seasons_spider = ["Toutes les saisons"] + sorted([y for y in df_starters_pos['Year_Clean'].unique() if y != "0"], reverse=True)
+                    selected_spider_year = st.selectbox("Filtrer par Saison :", all_seasons_spider, key="spider_year_select")
+                with col_r2:
+                    other_mgrs = ["Moyenne de la Ligue"] + [m for m in managers_list_prof if m != selected_prof]
+                    compare_target = st.selectbox("Comparer avec :", other_mgrs, key="compare_radar_select")
+                
+                if selected_spider_year != "Toutes les saisons":
+                    df_spider_filtered = df_starters_pos[df_starters_pos['Year_Clean'] == selected_spider_year]
+                else:
+                    df_spider_filtered = df_starters_pos
+                    
+                # Étape 1 : Total de points par manager, saison et poste
+                mgr_yr_pos = df_spider_filtered.groupby(['Manager', 'Year_Clean', 'POS_Clean'])['Fantasy Points'].sum().reset_index()
+                
+                # Étape 2 : Moyenne par saison par poste
+                spider_avg = mgr_yr_pos.groupby(['Manager', 'POS_Clean'])['Fantasy Points'].mean().reset_index()
+                
+                pivot_pos = spider_avg.pivot(index='Manager', columns='POS_Clean', values='Fantasy Points').fillna(0)
                 
                 for p in pos_order:
                     if p not in pivot_pos.columns:
@@ -610,11 +638,6 @@ with tab3:
                     span = max_vals[p] - min_vals[p]
                     norm_pivot[p] = (pivot_pos[p] - min_vals[p]) / span * 100 if span > 0 else 100.0
                     
-                col_radar_opt, _ = st.columns([1, 2])
-                with col_radar_opt:
-                    other_mgrs = ["Moyenne de la Ligue"] + [m for m in managers_list_prof if m != selected_prof]
-                    compare_target = st.selectbox("Comparer avec :", other_mgrs, key="compare_radar_select")
-                    
                 fig_radar = go.Figure()
                 
                 # Courbe du manager sélectionné
@@ -628,7 +651,7 @@ with tab3:
                     name=selected_prof,
                     opacity=0.7,
                     text=raw_mgr + [raw_mgr[0]],
-                    hovertemplate='%{theta}: %{text:.1f} pts<extra></extra>'
+                    hovertemplate='%{theta}: %{text:.1f} pts/saison<extra></extra>'
                 ))
                 
                 # Superposition comparaison
@@ -643,7 +666,7 @@ with tab3:
                         opacity=0.3,
                         line=dict(dash='dash', color='gray'),
                         text=avg_raw + [avg_raw[0]],
-                        hovertemplate='%{theta}: %{text:.1f} pts (Moy)<extra></extra>'
+                        hovertemplate='%{theta}: %{text:.1f} pts/saison (Moy)<extra></extra>'
                     ))
                 elif compare_target in pivot_pos.index:
                     r_comp = norm_pivot.loc[compare_target, pos_order].tolist()
@@ -656,7 +679,7 @@ with tab3:
                         opacity=0.4,
                         line=dict(dash='dot'),
                         text=raw_comp + [raw_comp[0]],
-                        hovertemplate='%{theta}: %{text:.1f} pts<extra></extra>'
+                        hovertemplate='%{theta}: %{text:.1f} pts/saison<extra></extra>'
                     ))
                     
                 fig_radar.update_layout(
@@ -667,7 +690,7 @@ with tab3:
                 )
                 st.plotly_chart(fig_radar, use_container_width=True)
 
-        # 3. ÉVOLUTION W/L & SCORING
+        # 3. ÉVOLUTION W/L & SCORING (Design lisse et épuré)
         with p_subtab3:
             st.subheader("📈 Évolution du % W/L et des Points Marqués All-Time")
             
@@ -688,31 +711,51 @@ with tab3:
             col_graph1, col_graph2 = st.columns(2)
             
             with col_graph1:
-                fig_wl = px.line(
-                    wl_season,
-                    x='Year_Clean',
-                    y='WL_Pct',
-                    markers=True,
+                fig_wl = go.Figure()
+                fig_wl.add_trace(go.Scatter(
+                    x=wl_season['Year_Clean'],
+                    y=wl_season['WL_Pct'],
+                    mode='lines+markers+text',
+                    name='% W/L',
+                    text=wl_season['WL_Text'],
+                    textposition='top center',
+                    line=dict(shape='spline', width=4, color='#1f77b4'),
+                    fill='tozeroy',
+                    fillcolor='rgba(31, 119, 180, 0.15)',
+                    marker=dict(size=10, symbol='circle', line=dict(width=2, color='white'))
+                ))
+                fig_wl.update_layout(
                     title="Courbe du Ratio % W/L par Saison",
-                    labels={'Year_Clean': 'Saison', 'WL_Pct': '% Victoires (W/L)'},
-                    text='WL_Text'
+                    yaxis=dict(range=[0, 105], gridcolor='rgba(200,200,200,0.2)'),
+                    xaxis=dict(showgrid=False),
+                    height=420,
+                    margin=dict(l=20, r=20, t=50, b=20),
+                    template="plotly_white"
                 )
-                fig_wl.update_traces(textposition="top center")
-                fig_wl.update_layout(height=400, yaxis=dict(range=[0, 100]), margin=dict(l=20, r=20, t=40, b=20))
                 st.plotly_chart(fig_wl, use_container_width=True)
                 
             with col_graph2:
-                fig_pts = px.line(
-                    wl_season,
-                    x='Year_Clean',
-                    y='Moy_Pts',
-                    markers=True,
+                fig_pts = go.Figure()
+                fig_pts.add_trace(go.Scatter(
+                    x=wl_season['Year_Clean'],
+                    y=wl_season['Moy_Pts'],
+                    mode='lines+markers+text',
+                    name='Pts / Match',
+                    text=wl_season['Moy_Pts'].map("{:.1f} pts".format),
+                    textposition='top center',
+                    line=dict(shape='spline', width=4, color='#ff7f0e'),
+                    fill='tozeroy',
+                    fillcolor='rgba(255, 127, 14, 0.15)',
+                    marker=dict(size=10, symbol='circle', line=dict(width=2, color='white'))
+                ))
+                fig_pts.update_layout(
                     title="Moyenne de Points Marqués / Match par Saison",
-                    labels={'Year_Clean': 'Saison', 'Moy_Pts': 'Pts / Match'},
-                    text=wl_season['Moy_Pts'].map("{:.1f} pts".format)
+                    yaxis=dict(gridcolor='rgba(200,200,200,0.2)'),
+                    xaxis=dict(showgrid=False),
+                    height=420,
+                    margin=dict(l=20, r=20, t=50, b=20),
+                    template="plotly_white"
                 )
-                fig_pts.update_traces(textposition="top center")
-                fig_pts.update_layout(height=400, margin=dict(l=20, r=20, t=40, b=20))
                 st.plotly_chart(fig_pts, use_container_width=True)
 
         # 4. TROPHÉES & BILAN SAISON
