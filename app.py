@@ -8,16 +8,18 @@ st.set_page_config(
     layout="wide"
 )
 
-# Injection CSS : Empêche le clavier mobile de s'ouvrir sur les menus déroulants (selectbox)
-st.markdown("""
+# Injection CSS : Empêche le clavier mobile iOS de s'ouvrir sur les menus déroulants
+st.markdown(
+    """
     <style>
     div[data-baseweb="select"] input {
-        inputmode: none !important;
+        pointer-events: none !important;
+        caret-color: transparent !important;
     }
     </style>
-""", unsafe_allow_html=True)
-
-st.title("🏈 Stats Historiques - NFL Fantasy League")
+""",
+    unsafe_allow_html=True,
+)
 
 # Chargement optimisé des données avec mise en cache
 @st.cache_data
