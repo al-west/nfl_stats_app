@@ -596,9 +596,9 @@ with tab3:
                 else:
                     st.info("Données GameCenter indisponibles pour ce manager sur cette saison.")
 
-        # 2. SPIDER CHART / RADAR CHART (Moyenne par saison par poste)
+        # 2. SPIDER CHART / RADAR CHART (Moyenne par Match par Poste)
         with p_subtab2:
-            st.subheader("🕸️ Balance Positionnelle (Moyenne de Pts par Saison et par Poste)")
+            st.subheader("🕸️ Balance Positionnelle (Moyenne de Pts par Match et par Poste)")
             
             pos_order = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF']
             df_starters_pos = df_gc_starters[df_gc_starters['POS_Clean'].isin(pos_order)].copy()
@@ -617,11 +617,11 @@ with tab3:
                 else:
                     df_spider_filtered = df_starters_pos
                     
-                # Étape 1 : Total de points par manager, saison et poste
-                mgr_yr_pos = df_spider_filtered.groupby(['Manager', 'Year_Clean', 'POS_Clean'])['Fantasy Points'].sum().reset_index()
+                # Étape 1 : Total de points par manager, saison, semaine et poste
+                mgr_wk_pos = df_spider_filtered.groupby(['Manager', 'Year_Clean', 'Week_Clean', 'POS_Clean'])['Fantasy Points'].sum().reset_index()
                 
-                # Étape 2 : Moyenne par saison par poste
-                spider_avg = mgr_yr_pos.groupby(['Manager', 'POS_Clean'])['Fantasy Points'].mean().reset_index()
+                # Étape 2 : Moyenne par semaine active par poste
+                spider_avg = mgr_wk_pos.groupby(['Manager', 'POS_Clean'])['Fantasy Points'].mean().reset_index()
                 
                 pivot_pos = spider_avg.pivot(index='Manager', columns='POS_Clean', values='Fantasy Points').fillna(0)
                 
@@ -640,7 +640,7 @@ with tab3:
                     
                 fig_radar = go.Figure()
                 
-                # Courbe du manager sélectionné
+                # Courbe du manager sélectionné (Bleu)
                 r_mgr = norm_pivot.loc[selected_prof, pos_order].tolist() if selected_prof in norm_pivot.index else [0]*6
                 raw_mgr = pivot_pos.loc[selected_prof, pos_order].tolist() if selected_prof in pivot_pos.index else [0]*6
                 
@@ -649,12 +649,13 @@ with tab3:
                     theta=pos_order + [pos_order[0]],
                     fill='toself',
                     name=selected_prof,
-                    opacity=0.7,
+                    line=dict(color='#1f77b4', width=3),
+                    fillcolor='rgba(31, 119, 180, 0.3)',
                     text=raw_mgr + [raw_mgr[0]],
-                    hovertemplate='%{theta}: %{text:.1f} pts/saison<extra></extra>'
+                    hovertemplate='%{theta}: %{text:.1f} pts/match<extra></extra>'
                 ))
                 
-                # Superposition comparaison
+                # Superposition comparaison (Rouge #E74C3C)
                 if compare_target == "Moyenne de la Ligue":
                     avg_raw = pivot_pos.mean().loc[pos_order].tolist()
                     avg_norm = norm_pivot.mean().loc[pos_order].tolist()
@@ -664,9 +665,10 @@ with tab3:
                         fill='toself',
                         name="Moyenne Ligue",
                         opacity=0.3,
-                        line=dict(dash='dash', color='gray'),
+                        line=dict(dash='dash', color='gray', width=2),
+                        fillcolor='rgba(128, 128, 128, 0.2)',
                         text=avg_raw + [avg_raw[0]],
-                        hovertemplate='%{theta}: %{text:.1f} pts/saison (Moy)<extra></extra>'
+                        hovertemplate='%{theta}: %{text:.1f} pts/match (Moy)<extra></extra>'
                     ))
                 elif compare_target in pivot_pos.index:
                     r_comp = norm_pivot.loc[compare_target, pos_order].tolist()
@@ -676,10 +678,10 @@ with tab3:
                         theta=pos_order + [pos_order[0]],
                         fill='toself',
                         name=compare_target,
-                        opacity=0.4,
-                        line=dict(dash='dot'),
+                        line=dict(color='#E74C3C', width=3),
+                        fillcolor='rgba(231, 76, 60, 0.25)',
                         text=raw_comp + [raw_comp[0]],
-                        hovertemplate='%{theta}: %{text:.1f} pts/saison<extra></extra>'
+                        hovertemplate='%{theta}: %{text:.1f} pts/match<extra></extra>'
                     ))
                     
                 fig_radar.update_layout(
