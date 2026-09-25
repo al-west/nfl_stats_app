@@ -1,5 +1,8 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
+import plotly.express as px
 
 # Configuration de la page
 st.set_page_config(
@@ -8,18 +11,17 @@ st.set_page_config(
     layout="wide"
 )
 
-# Injection CSS : Empêche le clavier mobile iOS de s'ouvrir sur les menus déroulants
-st.markdown(
-    """
+# Injection CSS : Empêche le clavier mobile iOS/Android de s'ouvrir sur les menus déroulants (selectbox)
+st.markdown("""
     <style>
     div[data-baseweb="select"] input {
         pointer-events: none !important;
         caret-color: transparent !important;
     }
     </style>
-""",
-    unsafe_allow_html=True,
-)
+""", unsafe_allow_html=True)
+
+st.title("🏈 Stats Historiques - NFL Fantasy League")
 
 # Chargement optimisé des données avec mise en cache
 @st.cache_data
@@ -86,10 +88,13 @@ if gc_wk_candidates:
 else:
     df_gamecenter['Week_Clean'] = ""
 
-# Subsets GameCenter : Titulaires vs Banc
+# Normalisation des positions et séparation Titulaires / Banc
 bench_positions = ['BN', 'BENCH', 'BNCH', 'BE']
 if 'POS' in df_gamecenter.columns:
-    is_bench_mask = df_gamecenter['POS'].astype(str).str.strip().str.upper().isin(bench_positions)
+    df_gamecenter['POS_Clean'] = df_gamecenter['POS'].astype(str).str.strip().str.upper().apply(
+        lambda x: 'DEF' if x in ['DEF', 'D/ST', 'DST'] else x
+    )
+    is_bench_mask = df_gamecenter['POS_Clean'].isin(bench_positions)
     df_gc_starters = df_gamecenter[~is_bench_mask].copy()
     df_gc_bench = df_gamecenter[is_bench_mask].copy()
 else:
@@ -135,18 +140,17 @@ award_emojis = {
     'PxC': '🎯'
 }
 
-
 # Navigation par onglets
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📊 Scores & Matchups", 
-    "⚔️ Face-à-Face", 
+    "⚔️ Face-à-Face & Rivalités", 
     "👤 Profils Managers",
     "🏅 Livre des Records",
     "⭐ GameCenter (Joueurs)", 
     "🏆 Trophées & Awards"
 ])
 
-# --- ONGLET 1 : SCORES ---
+# --- ONGLET 1 : SCORES & MATCHUPS ---
 with tab1:
     st.header("Historique des Scores & Matchups")
     
@@ -249,9 +253,44 @@ with tab1:
         hide_index=True
     )
 
-# --- ONGLET 2 : FACE-A-FACE ---
+    st.markdown("---")
+    st.subheader("🍀 Indice de Chance & Poisse (Luck Index - Attaque vs. Défense Subie)")
+    
+    # Graphique Scatter Plot Luck Index
+    df_luck = df_scores[df_scores['Offense'] > 0].groupby(['Manager', 'Year_Clean']).agg(
+        Pts_Marques=('Offense', 'sum'),
+        Pts_Encaisses=('Defense', 'sum'),
+        Victoires=('WinLose', lambda x: (x == 'W').sum()),
+        Defaites=('WinLose', lambda x: (x == 'L').sum()),
+        Nuls=('WinLose', lambda x: (x == 'T').sum())
+    ).reset_index()
+    
+    if not df_luck.empty:
+        df_luck['Record'] = df_luck.apply(
+            lambda r: f"{r['Victoires']}W-{r['Defaites']}L" + (f"-{r['Nuls']}T" if r['Nuls'] > 0 else ""), axis=1
+        )
+        avg_pts_m = df_luck['Pts_Marques'].mean()
+        avg_pts_e = df_luck['Pts_Encaisses'].mean()
+        
+        fig_luck = px.scatter(
+            df_luck,
+            x='Pts_Marques',
+            y='Pts_Encaisses',
+            color='Manager',
+            text='Record',
+            hover_data={'Manager': True, 'Year_Clean': True, 'Record': True, 'Pts_Marques': ':.2f', 'Pts_Encaisses': ':.2f'},
+            labels={'Pts_Marques': 'Points Marqués (Attaque)', 'Pts_Encaisses': 'Points Encaissés (Défense Subie)'}
+        )
+        fig_luck.add_vline(x=avg_pts_m, line_dash="dash", line_color="gray", annotation_text="Moyenne Ligue Attaque")
+        fig_luck.add_hline(y=avg_pts_e, line_dash="dash", line_color="gray", annotation_text="Moyenne Ligue Défense Subie")
+        fig_luck.update_traces(textposition='top center', marker=dict(size=10))
+        fig_luck.update_layout(height=500, margin=dict(l=40, r=40, t=30, b=40))
+        st.plotly_chart(fig_luck, use_container_width=True)
+
+
+# --- ONGLET 2 : FACE-A-FACE & RIVALITÉS ---
 with tab2:
-    st.header("⚔️ Comparateur Face-à-Face / Rivalités")
+    st.header("⚔️ Comparateur Face-à-Face & Rivalités")
     
     managers_list_h2h = sorted([str(m) for m in df_scores['Manager'].dropna().unique() if str(m).strip() not in ["", "nan"]])
     
@@ -329,6 +368,59 @@ with tab2:
                     hide_index=True
                 )
 
+    st.markdown("---")
+    st.subheader("🔥 Matrice de Rivalité Globale (Tous les Managers Historiques)")
+    
+    # Heatmap H2H globale
+    all_historical_managers = sorted([str(m) for m in df_scores['Manager'].dropna().unique() if str(m).strip() not in ["", "nan"]])
+    
+    matrix_text = []
+    matrix_pct = []
+    
+    for mgr1 in all_historical_managers:
+        row_text = []
+        row_pct = []
+        for mgr2 in all_historical_managers:
+            if mgr1 == mgr2:
+                row_text.append("-")
+                row_pct.append(np.nan)
+            else:
+                df_pair = df_scores[(df_scores['Manager'] == mgr1) & (df_scores['Opponent'] == mgr2) & (df_scores['Offense'] > 0)]
+                if df_pair.empty:
+                    row_text.append("N/A")
+                    row_pct.append(np.nan)
+                else:
+                    w = (df_pair['WinLose'] == 'W').sum()
+                    l = (df_pair['WinLose'] == 'L').sum()
+                    t = (df_pair['WinLose'] == 'T').sum()
+                    
+                    emoji = "🟢" if w > l else ("🔴" if w < l else "🤝")
+                    pct = (w + 0.5 * t) / len(df_pair) * 100
+                    txt = f"{emoji} {w}-{l}" + (f"-{t}" if t > 0 else "")
+                    
+                    row_text.append(txt)
+                    row_pct.append(pct)
+        matrix_text.append(row_text)
+        matrix_pct.append(row_pct)
+        
+    fig_heatmap = px.imshow(
+        matrix_pct,
+        x=all_historical_managers,
+        y=all_historical_managers,
+        labels=dict(x="Adversaire", y="Manager", color="% Victoires"),
+        text_auto=False,
+        color_continuous_scale="RdYlGn",
+        aspect="auto"
+    )
+    fig_heatmap.update_traces(
+        text=matrix_text,
+        texttemplate="%{text}",
+        hovertemplate="Manager: %{y}<br>Adversaire: %{x}<br>Bilan: %{text}<extra></extra>"
+    )
+    fig_heatmap.update_layout(height=600, margin=dict(l=40, r=40, t=30, b=40))
+    st.plotly_chart(fig_heatmap, use_container_width=True)
+
+
 # --- ONGLET 3 : PROFILS MANAGERS ---
 with tab3:
     st.header("👤 Profil & CV de Manager")
@@ -358,7 +450,7 @@ with tab3:
         col_p1.metric(
             label="Bilan All-Time",
             value=f"{wins}W - {losses}L" + (f" - {ties}T" if ties > 0 else ""),
-            delta=f"{win_pct:.1f}% de victoires",
+            delta=f"{win_pct:.1f}% W/L",
             delta_color="normal" if win_pct >= 50 else "inverse"
         )
         
@@ -385,71 +477,312 @@ with tab3:
         
         st.markdown("---")
         
-        st.subheader("🏆 Armoire à Trophées & Récompenses")
-        m_awards = df_awards[df_awards['Player'].astype(str) == selected_prof].copy()
+        # SUB-TABS DANS LE PROFIL MANAGER
+        p_subtab1, p_subtab2, p_subtab3, p_subtab4 = st.tabs([
+            "🌟 Roster Snapshot (All-Star)",
+            "🕸️ Balance Positionnelle (Spider Chart)",
+            "📈 Évolution W/L & Scoring",
+            "🏆 Trophées & Bilan Saison"
+        ])
         
-        if not m_awards.empty:
-            df_disp_m_awards = m_awards.copy()
+        # 1. ROSTER SNAPSHOT ALL-STAR
+        with p_subtab1:
+            st.subheader("🌟 Roster Snapshot Titulaire par Saison")
             
-            for col, emoji in award_emojis.items():
-                if col in df_disp_m_awards.columns:
-                    df_disp_m_awards[col] = df_disp_m_awards[col].apply(
-                        lambda x: emoji if str(x).strip() in ['1', '1.0', '1.00'] else "-"
+            mgr_years = sorted([y for y in m_scores['Year_Clean'].unique() if y != "0"], reverse=True)
+            if mgr_years:
+                selected_roster_year = st.selectbox("Choisir la Saison :", mgr_years, key="roster_year_select")
+                
+                # Badges de fin de saison (Awards)
+                m_awards_yr = df_awards[(df_awards['Player'].astype(str) == selected_prof) & (df_awards['Year_Clean'] == selected_roster_year)]
+                
+                reg_rank_str = "-"
+                playoff_rank_str = "-"
+                if not m_awards_yr.empty:
+                    row_a = m_awards_yr.iloc[0]
+                    reg_rank_str = format_rank_reg(row_a.get('Reg Season Rank', None))
+                    playoff_rank_str = format_rank_playoffs(row_a.get('Playoffs Rank', None))
+                    
+                b_col1, b_col2 = st.columns(2)
+                b_col1.metric(f"Rang Saison Régulière ({selected_roster_year})", reg_rank_str)
+                b_col2.metric(f"Rang Playoffs Final ({selected_roster_year})", playoff_rank_str)
+                
+                # All-Star Lineup (Titulaires uniquement, POS != BN)
+                df_m_starters = df_gc_starters[
+                    (df_gc_starters['Manager'].astype(str) == selected_prof) & 
+                    (df_gc_starters['Year_Clean'] == selected_roster_year)
+                ].copy()
+                
+                if not df_m_starters.empty:
+                    player_summary = df_m_starters.groupby(['Player', 'POS_Clean']).agg(
+                        Total_Pts=('Fantasy Points', 'sum'),
+                        Games=('Fantasy Points', 'count')
+                    ).reset_index()
+                    
+                    all_star_lineup = []
+                    used_players = set()
+                    
+                    # QB1
+                    qbs = player_summary[player_summary['POS_Clean'] == 'QB'].sort_values(by='Total_Pts', ascending=False)
+                    if not qbs.empty:
+                        row = qbs.iloc[0]
+                        all_star_lineup.append(('🎯 QB1', row['Player'], row['Total_Pts'], row['Games']))
+                        used_players.add(row['Player'])
+                        
+                    # RB1 & RB2
+                    rbs = player_summary[player_summary['POS_Clean'] == 'RB'].sort_values(by='Total_Pts', ascending=False)
+                    for idx, slot in enumerate(['🏃 RB1', '🏃 RB2']):
+                        if len(rbs) > idx:
+                            row = rbs.iloc[idx]
+                            all_star_lineup.append((slot, row['Player'], row['Total_Pts'], row['Games']))
+                            used_players.add(row['Player'])
+                            
+                    # WR1 & WR2
+                    wrs = player_summary[player_summary['POS_Clean'] == 'WR'].sort_values(by='Total_Pts', ascending=False)
+                    for idx, slot in enumerate(['🙌 WR1', '🙌 WR2']):
+                        if len(wrs) > idx:
+                            row = wrs.iloc[idx]
+                            all_star_lineup.append((slot, row['Player'], row['Total_Pts'], row['Games']))
+                            used_players.add(row['Player'])
+                            
+                    # TE1
+                    tes = player_summary[player_summary['POS_Clean'] == 'TE'].sort_values(by='Total_Pts', ascending=False)
+                    if not tes.empty:
+                        row = tes.iloc[0]
+                        all_star_lineup.append(('⚡ TE1', row['Player'], row['Total_Pts'], row['Games']))
+                        used_players.add(row['Player'])
+                        
+                    # FLEX (Top RB/WR/TE restant)
+                    flex_candidates = player_summary[
+                        (player_summary['POS_Clean'].isin(['RB', 'WR', 'TE'])) & 
+                        (~player_summary['Player'].isin(used_players))
+                    ].sort_values(by='Total_Pts', ascending=False)
+                    if not flex_candidates.empty:
+                        row = flex_candidates.iloc[0]
+                        all_star_lineup.append((f"🔀 FLEX ({row['POS_Clean']})", row['Player'], row['Total_Pts'], row['Games']))
+                        used_players.add(row['Player'])
+                        
+                    # K1
+                    ks = player_summary[player_summary['POS_Clean'] == 'K'].sort_values(by='Total_Pts', ascending=False)
+                    if not ks.empty:
+                        row = ks.iloc[0]
+                        all_star_lineup.append(('🦶 K1', row['Player'], row['Total_Pts'], row['Games']))
+                        used_players.add(row['Player'])
+                        
+                    # DEF1
+                    defs = player_summary[player_summary['POS_Clean'] == 'DEF'].sort_values(by='Total_Pts', ascending=False)
+                    if not defs.empty:
+                        row = defs.iloc[0]
+                        all_star_lineup.append(('🛡️ DEF1', row['Player'], row['Total_Pts'], row['Games']))
+                        used_players.add(row['Player'])
+                        
+                    df_lineup_disp = pd.DataFrame(all_star_lineup, columns=['Poste', 'Joueur', 'Points Marqués (Titulaire)', 'Matchs Joués'])
+                    st.dataframe(
+                        df_lineup_disp,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={"Points Marqués (Titulaire)": st.column_config.NumberColumn(format="%.2f pts")}
                     )
+                else:
+                    st.info("Données GameCenter indisponibles pour ce manager sur cette saison.")
 
-            if 'Playoffs Rank' in df_disp_m_awards.columns:
-                df_disp_m_awards['Playoffs Rank'] = df_disp_m_awards['Playoffs Rank'].apply(format_rank_playoffs)
-            if 'Reg Season Rank' in df_disp_m_awards.columns:
-                df_disp_m_awards['Reg Season Rank'] = df_disp_m_awards['Reg Season Rank'].apply(format_rank_reg)
+        # 2. SPIDER CHART / RADAR CHART
+        with p_subtab2:
+            st.subheader("🕸️ Balance Positionnelle (Radar Chart - Titulaires)")
+            
+            pos_order = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF']
+            df_starters_pos = df_gc_starters[df_gc_starters['POS_Clean'].isin(pos_order)].copy()
+            
+            if not df_starters_pos.empty:
+                pos_totals = df_starters_pos.groupby(['Manager', 'POS_Clean'])['Fantasy Points'].sum().reset_index()
+                pivot_pos = pos_totals.pivot(index='Manager', columns='POS_Clean', values='Fantasy Points').fillna(0)
+                
+                for p in pos_order:
+                    if p not in pivot_pos.columns:
+                        pivot_pos[p] = 0.0
+                pivot_pos = pivot_pos[pos_order]
+                
+                min_vals = pivot_pos.min()
+                max_vals = pivot_pos.max()
+                
+                norm_pivot = pivot_pos.copy()
+                for p in pos_order:
+                    span = max_vals[p] - min_vals[p]
+                    norm_pivot[p] = (pivot_pos[p] - min_vals[p]) / span * 100 if span > 0 else 100.0
+                    
+                col_radar_opt, _ = st.columns([1, 2])
+                with col_radar_opt:
+                    other_mgrs = ["Moyenne de la Ligue"] + [m for m in managers_list_prof if m != selected_prof]
+                    compare_target = st.selectbox("Comparer avec :", other_mgrs, key="compare_radar_select")
+                    
+                fig_radar = go.Figure()
+                
+                # Courbe du manager sélectionné
+                r_mgr = norm_pivot.loc[selected_prof, pos_order].tolist() if selected_prof in norm_pivot.index else [0]*6
+                raw_mgr = pivot_pos.loc[selected_prof, pos_order].tolist() if selected_prof in pivot_pos.index else [0]*6
+                
+                fig_radar.add_trace(go.Scatterpolar(
+                    r=r_mgr + [r_mgr[0]],
+                    theta=pos_order + [pos_order[0]],
+                    fill='toself',
+                    name=selected_prof,
+                    opacity=0.7,
+                    text=raw_mgr + [raw_mgr[0]],
+                    hovertemplate='%{theta}: %{text:.1f} pts<extra></extra>'
+                ))
+                
+                # Superposition comparaison
+                if compare_target == "Moyenne de la Ligue":
+                    avg_raw = pivot_pos.mean().loc[pos_order].tolist()
+                    avg_norm = norm_pivot.mean().loc[pos_order].tolist()
+                    fig_radar.add_trace(go.Scatterpolar(
+                        r=avg_norm + [avg_norm[0]],
+                        theta=pos_order + [pos_order[0]],
+                        fill='toself',
+                        name="Moyenne Ligue",
+                        opacity=0.3,
+                        line=dict(dash='dash', color='gray'),
+                        text=avg_raw + [avg_raw[0]],
+                        hovertemplate='%{theta}: %{text:.1f} pts (Moy)<extra></extra>'
+                    ))
+                elif compare_target in pivot_pos.index:
+                    r_comp = norm_pivot.loc[compare_target, pos_order].tolist()
+                    raw_comp = pivot_pos.loc[compare_target, pos_order].tolist()
+                    fig_radar.add_trace(go.Scatterpolar(
+                        r=r_comp + [r_comp[0]],
+                        theta=pos_order + [pos_order[0]],
+                        fill='toself',
+                        name=compare_target,
+                        opacity=0.4,
+                        line=dict(dash='dot'),
+                        text=raw_comp + [raw_comp[0]],
+                        hovertemplate='%{theta}: %{text:.1f} pts<extra></extra>'
+                    ))
+                    
+                fig_radar.update_layout(
+                    polar=dict(radialaxis=dict(visible=True, range=[0, 100], showticklabels=False)),
+                    showlegend=True,
+                    height=450,
+                    margin=dict(l=40, r=40, t=30, b=30)
+                )
+                st.plotly_chart(fig_radar, use_container_width=True)
 
-            rename_awards_prof = {
+        # 3. ÉVOLUTION W/L & SCORING
+        with p_subtab3:
+            st.subheader("📈 Évolution du % W/L et des Points Marqués All-Time")
+            
+            wl_season = m_scores.groupby('Year_Clean').agg(
+                W=('WinLose', lambda x: (x == 'W').sum()),
+                L=('WinLose', lambda x: (x == 'L').sum()),
+                T=('WinLose', lambda x: (x == 'T').sum()),
+                Total_Games=('WinLose', 'count'),
+                Pts_Marques=('Offense', 'sum'),
+                Moy_Pts=('Offense', 'mean')
+            ).reset_index()
+            
+            wl_season['WL_Pct'] = (wl_season['W'] + 0.5 * wl_season['T']) / wl_season['Total_Games'] * 100
+            wl_season['WL_Text'] = wl_season.apply(
+                lambda r: f"{r['W']}W - {r['L']}L" + (f" - {r['T']}T" if r['T'] > 0 else "") + f" ({r['WL_Pct']:.1f}% W/L)", axis=1
+            )
+            
+            col_graph1, col_graph2 = st.columns(2)
+            
+            with col_graph1:
+                fig_wl = px.line(
+                    wl_season,
+                    x='Year_Clean',
+                    y='WL_Pct',
+                    markers=True,
+                    title="Courbe du Ratio % W/L par Saison",
+                    labels={'Year_Clean': 'Saison', 'WL_Pct': '% Victoires (W/L)'},
+                    text='WL_Text'
+                )
+                fig_wl.update_traces(textposition="top center")
+                fig_wl.update_layout(height=400, yaxis=dict(range=[0, 100]), margin=dict(l=20, r=20, t=40, b=20))
+                st.plotly_chart(fig_wl, use_container_width=True)
+                
+            with col_graph2:
+                fig_pts = px.line(
+                    wl_season,
+                    x='Year_Clean',
+                    y='Moy_Pts',
+                    markers=True,
+                    title="Moyenne de Points Marqués / Match par Saison",
+                    labels={'Year_Clean': 'Saison', 'Moy_Pts': 'Pts / Match'},
+                    text=wl_season['Moy_Pts'].map("{:.1f} pts".format)
+                )
+                fig_pts.update_traces(textposition="top center")
+                fig_pts.update_layout(height=400, margin=dict(l=20, r=20, t=40, b=20))
+                st.plotly_chart(fig_pts, use_container_width=True)
+
+        # 4. TROPHÉES & BILAN SAISON
+        with p_subtab4:
+            st.subheader("🏆 Armoire à Trophées & Récompenses")
+            m_awards = df_awards[df_awards['Player'].astype(str) == selected_prof].copy()
+            
+            if not m_awards.empty:
+                df_disp_m_awards = m_awards.copy()
+                
+                for col, emoji in award_emojis.items():
+                    if col in df_disp_m_awards.columns:
+                        df_disp_m_awards[col] = df_disp_m_awards[col].apply(
+                            lambda x: emoji if str(x).strip() in ['1', '1.0', '1.00'] else "-"
+                        )
+
+                if 'Playoffs Rank' in df_disp_m_awards.columns:
+                    df_disp_m_awards['Playoffs Rank'] = df_disp_m_awards['Playoffs Rank'].apply(format_rank_playoffs)
+                if 'Reg Season Rank' in df_disp_m_awards.columns:
+                    df_disp_m_awards['Reg Season Rank'] = df_disp_m_awards['Reg Season Rank'].apply(format_rank_reg)
+
+                rename_awards_prof = {
+                    'Year_Clean': 'Saison',
+                    'Playoffs Rank': 'Rang Playoffs',
+                    'Reg Season Rank': 'Rang Reg. Season',
+                    'OPOY': 'OPOY 🏈',
+                    'DPOY': 'DPOY 🛡️',
+                    'COY': 'COY 🧢',
+                    'WorM': 'WorM 🪱',
+                    'TOY': 'TOY 🪖',
+                    'Playoffs': 'Playoffs 🎟️',
+                    'PxC': 'PxC 🎯'
+                }
+                
+                cols_awards_prof = [c for c in ['Year_Clean', 'Playoffs Rank', 'Reg Season Rank', 'OPOY', 'DPOY', 'COY', 'WorM', 'TOY', 'Playoffs', 'PxC'] if c in df_disp_m_awards.columns]
+                df_disp_m_awards = df_disp_m_awards[cols_awards_prof].rename(columns=rename_awards_prof)
+                
+                st.dataframe(df_disp_m_awards, use_container_width=True, hide_index=True)
+            else:
+                st.info("Aucun trophée ou classement répertorié dans l'onglet Awards pour ce manager.")
+                
+            st.markdown("---")
+            
+            st.subheader("📈 Bilan Saison par Saison")
+            saison_summary = m_scores.groupby('Year_Clean').agg(
+                Matchs=('WinLose', 'count'),
+                Victoires=('WinLose', lambda x: (x == 'W').sum()),
+                Défaites=('WinLose', lambda x: (x == 'L').sum()),
+                Nuls=('WinLose', lambda x: (x == 'T').sum()),
+                Total_Points=('Offense', 'sum'),
+                Moyenne_Points=('Offense', 'mean')
+            ).reset_index().rename(columns={
                 'Year_Clean': 'Saison',
-                'Playoffs Rank': 'Rang Playoffs',
-                'Reg Season Rank': 'Rang Reg. Season',
-                'OPOY': 'OPOY 🏈',
-                'DPOY': 'DPOY 🛡️',
-                'COY': 'COY 🧢',
-                'WorM': 'WorM 🪱',
-                'TOY': 'TOY 🪖',
-                'Playoffs': 'Playoffs 🎟️',
-                'PxC': 'PxC 🎯'
-            }
+                'Total_Points': 'Total Pts Marqués',
+                'Moyenne_Points': 'Moyenne Pts/Match'
+            })
             
-            cols_awards_prof = [c for c in ['Year_Clean', 'Playoffs Rank', 'Reg Season Rank', 'OPOY', 'DPOY', 'COY', 'WorM', 'TOY', 'Playoffs', 'PxC'] if c in df_disp_m_awards.columns]
-            df_disp_m_awards = df_disp_m_awards[cols_awards_prof].rename(columns=rename_awards_prof)
+            saison_summary['% W/L'] = ((saison_summary['Victoires'] + 0.5 * saison_summary['Nuls']) / saison_summary['Matchs'] * 100).map("{:.1f}%".format)
+            saison_summary = saison_summary.sort_values(by='Saison', ascending=False)
             
-            st.dataframe(df_disp_m_awards, use_container_width=True, hide_index=True)
-        else:
-            st.info("Aucun trophée ou classement répertorié dans l'onglet Awards pour ce manager.")
-            
-        st.markdown("---")
-        
-        st.subheader("📈 Bilan Saison par Saison")
-        saison_summary = m_scores.groupby('Year_Clean').agg(
-            Matchs=('WinLose', 'count'),
-            Victoires=('WinLose', lambda x: (x == 'W').sum()),
-            Défaites=('WinLose', lambda x: (x == 'L').sum()),
-            Nuls=('WinLose', lambda x: (x == 'T').sum()),
-            Total_Points=('Offense', 'sum'),
-            Moyenne_Points=('Offense', 'mean')
-        ).reset_index().rename(columns={
-            'Year_Clean': 'Saison',
-            'Total_Points': 'Total Pts Marqués',
-            'Moyenne_Points': 'Moyenne Pts/Match'
-        })
-        
-        saison_summary['% Victoires'] = (saison_summary['Victoires'] / saison_summary['Matchs'] * 100).map("{:.1f}%".format)
-        saison_summary = saison_summary.sort_values(by='Saison', ascending=False)
-        
-        st.dataframe(
-            saison_summary[['Saison', 'Matchs', 'Victoires', 'Défaites', 'Nuls', '% Victoires', 'Total Pts Marqués', 'Moyenne Pts/Match']],
-            use_container_width=True,
-            column_config={
-                "Total Pts Marqués": st.column_config.NumberColumn(format="%.2f"),
-                "Moyenne Pts/Match": st.column_config.NumberColumn(format="%.2f"),
-            },
-            hide_index=True
-        )
+            st.dataframe(
+                saison_summary[['Saison', 'Matchs', 'Victoires', 'Défaites', 'Nuls', '% W/L', 'Total Pts Marqués', 'Moyenne Pts/Match']],
+                use_container_width=True,
+                column_config={
+                    "Total Pts Marqués": st.column_config.NumberColumn(format="%.2f"),
+                    "Moyenne Pts/Match": st.column_config.NumberColumn(format="%.2f"),
+                },
+                hide_index=True
+            )
+
 
 # --- ONGLET 4 : LIVRE DES RECORDS ---
 with tab4:
@@ -597,6 +930,7 @@ with tab4:
         else:
             st.info("Aucun score enregistré sur le banc dans GameCenter.")
 
+
 # --- ONGLET 5 : GAMECENTER (JOUEURS) ---
 with tab5:
     st.header("⭐ GameCenter - Performances des Joueurs (Titulaires Uniquement)")
@@ -646,9 +980,9 @@ with tab5:
         
         for label, pos_code, col in positions_kpi:
             if pos_code == "DEF":
-                pos_df = df_kpi_base[df_kpi_base['POS'].astype(str).str.upper().isin(['DEF', 'D/ST', 'DST'])]
+                pos_df = df_kpi_base[df_kpi_base['POS_Clean'] == 'DEF']
             else:
-                pos_df = df_kpi_base[df_kpi_base['POS'].astype(str).str.upper() == pos_code]
+                pos_df = df_kpi_base[df_kpi_base['POS_Clean'] == pos_code]
                 
             if not pos_df.empty:
                 max_row = pos_df.loc[pos_df['Fantasy Points'].idxmax()]
@@ -681,9 +1015,9 @@ with tab5:
         
         for label, pos_code, col in positions_tot_kpi:
             if pos_code == "DEF":
-                pos_df = df_kpi_base[df_kpi_base['POS'].astype(str).str.upper().isin(['DEF', 'D/ST', 'DST'])]
+                pos_df = df_kpi_base[df_kpi_base['POS_Clean'] == 'DEF']
             else:
-                pos_df = df_kpi_base[df_kpi_base['POS'].astype(str).str.upper() == pos_code]
+                pos_df = df_kpi_base[df_kpi_base['POS_Clean'] == pos_code]
                 
             if not pos_df.empty:
                 player_totals = pos_df.groupby('Player')['Fantasy Points'].sum()
@@ -741,6 +1075,7 @@ with tab5:
         },
         hide_index=True
     )
+
 
 # --- ONGLET 6 : AWARDS ---
 with tab6:
