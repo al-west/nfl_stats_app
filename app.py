@@ -8,6 +8,15 @@ st.set_page_config(
     layout="wide"
 )
 
+# Injection CSS : Empêche le clavier mobile de pop sur les menus déroulants (selectbox)
+st.markdown("""
+    <style>
+    div[data-baseweb="select"] input {
+        inputmode: none !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 st.title("🏈 Stats Historiques - NFL Fantasy League")
 
 # Chargement optimisé des données avec mise en cache
@@ -74,6 +83,12 @@ if gc_wk_candidates:
     df_gamecenter['Week_Clean'] = pd.to_numeric(df_gamecenter[gc_wk_candidates[0]], errors='coerce').fillna(0).astype(int).astype(str)
 else:
     df_gamecenter['Week_Clean'] = ""
+
+# EXCLUSION GLOBALE DES JOUEURS SUR LE BANC (BN / BENCH / BE)
+if 'POS' in df_gamecenter.columns:
+    df_gamecenter = df_gamecenter[
+        ~df_gamecenter['POS'].astype(str).str.strip().str.upper().isin(['BN', 'BENCH', 'BNCH', 'BE'])
+    ].copy()
 
 # --- AWARDS ---
 if 'Year' in df_awards.columns:
@@ -521,7 +536,7 @@ with tab4:
 
     # 4. TOPS JOUEURS NFL
     with rec_tab4:
-        st.subheader("⭐ Top 20 Performances Individuelles de Joueurs (All-Time)")
+        st.subheader("⭐ Top 20 Performances Individuelles de Joueurs (Titulaires All-Time)")
         if not df_gamecenter.empty and 'Fantasy Points' in df_gamecenter.columns:
             top_players = df_gamecenter.sort_values(by='Fantasy Points', ascending=False).head(20).copy()
             
@@ -537,7 +552,7 @@ with tab4:
 
 # --- ONGLET 5 : GAMECENTER (JOUEURS) ---
 with tab5:
-    st.header("⭐ GameCenter - Performances des Joueurs")
+    st.header("⭐ GameCenter - Performances des Joueurs (Titulaires Uniquement)")
     
     # Filtres interactifs avancés
     gc_col1, gc_col2, gc_col3, gc_col4 = st.columns(4)
@@ -556,7 +571,7 @@ with tab5:
         selected_gc_year = st.selectbox("Saison :", gc_years, key="gc_year_select")
         
     with gc_col4:
-        player_search = st.text_input("Rechercher un joueur :", placeholder="ex: M. Ryan")
+        player_search = st.text_input("Rechercher un joueur :", placeholder="ex: Patrick Mahomes")
         
     # Base filtrée pour les KPIs (recherche, manager, saison)
     df_kpi_base = df_gamecenter.dropna(subset=['Fantasy Points']).copy()
@@ -570,7 +585,7 @@ with tab5:
         
     if not df_kpi_base.empty:
         # SECTION 1 : RECORDS SUR 1 MATCH
-        st.subheader("⚡ Record sur 1 Match")
+        st.subheader("⚡ Record sur 1 Match (Titulaire)")
         gc_c1, gc_c2, gc_c3, gc_c4, gc_c5, gc_c6 = st.columns(6)
         
         positions_kpi = [
@@ -605,7 +620,7 @@ with tab5:
                 col.metric(label=label, value="-", delta="Aucune donnée", delta_color="off")
 
         # SECTION 2 : TOTAUX CUMULÉS DE POINTS
-        st.subheader("📊 Totaux Cumulés de Points")
+        st.subheader("📊 Totaux Cumulés de Points (Titulaire)")
         tot_c1, tot_c2, tot_c3, tot_c4, tot_c5, tot_c6 = st.columns(6)
         
         positions_tot_kpi = [
