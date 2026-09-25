@@ -8,7 +8,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Injection CSS : Empêche le clavier mobile de pop sur les menus déroulants (selectbox)
+# Injection CSS : Empêche le clavier mobile de s'ouvrir sur les menus déroulants (selectbox)
 st.markdown("""
     <style>
     div[data-baseweb="select"] input {
@@ -24,13 +24,13 @@ st.title("🏈 Stats Historiques - NFL Fantasy League")
 def load_data():
     file_path = "NFL Fantasy Stats.xlsx"
     
-    # 1. Onglet SCORES (Colonnes A à J -> 0 à 9)
+    # 1. Onglet SCORES
     df_scores = pd.read_excel(file_path, sheet_name="SCORES", usecols=range(10))
     
-    # 2. Onglet GameCenter (Colonnes A à J -> 0 à 9)
+    # 2. Onglet GameCenter
     df_gamecenter = pd.read_excel(file_path, sheet_name="GameCenter", usecols=range(10))
     
-    # 3. Onglet Awards (Colonnes A à K -> 0 à 10)
+    # 3. Onglet Awards
     df_awards = pd.read_excel(file_path, sheet_name="Awards", usecols=range(11))
     
     # Nettoyage des espaces invisibles dans les entêtes
@@ -48,7 +48,7 @@ except Exception as e:
     st.error(f"Erreur lors du chargement du fichier Excel : {e}")
     st.stop()
 
-# Nettoyage et typage préventif
+# --- NETTOYAGE SCORES ---
 for col in ['Offense', 'Defense', 'Delta', 'Combine']:
     if col in df_scores.columns:
         df_scores[col] = pd.to_numeric(df_scores[col], errors='coerce')
@@ -71,7 +71,7 @@ if 'WinLose' not in df_scores.columns:
         lambda r: 'W' if r['Offense'] > r['Defense'] else ('L' if r['Offense'] < r['Defense'] else 'T'), axis=1
     )
 
-# --- GAMECENTER ---
+# --- NETTOYAGE GAMECENTER ---
 if 'Fantasy Points' in df_gamecenter.columns:
     df_gamecenter['Fantasy Points'] = pd.to_numeric(df_gamecenter['Fantasy Points'], errors='coerce')
 
@@ -84,15 +84,54 @@ if gc_wk_candidates:
 else:
     df_gamecenter['Week_Clean'] = ""
 
-# EXCLUSION GLOBALE DES JOUEURS SUR LE BANC (BN / BENCH / BE)
+# Subsets GameCenter : Titulaires vs Banc
+bench_positions = ['BN', 'BENCH', 'BNCH', 'BE']
 if 'POS' in df_gamecenter.columns:
-    df_gamecenter = df_gamecenter[
-        ~df_gamecenter['POS'].astype(str).str.strip().str.upper().isin(['BN', 'BENCH', 'BNCH', 'BE'])
-    ].copy()
+    is_bench_mask = df_gamecenter['POS'].astype(str).str.strip().str.upper().isin(bench_positions)
+    df_gc_starters = df_gamecenter[~is_bench_mask].copy()
+    df_gc_bench = df_gamecenter[is_bench_mask].copy()
+else:
+    df_gc_starters = df_gamecenter.copy()
+    df_gc_bench = pd.DataFrame()
 
-# --- AWARDS ---
+# --- NETTOYAGE AWARDS ---
 if 'Year' in df_awards.columns:
     df_awards['Year_Clean'] = pd.to_numeric(df_awards['Year'], errors='coerce').fillna(0).astype(int).astype(str)
+
+# Fonctions de formatage des rangs et trophées
+def format_rank_playoffs(val):
+    if pd.isna(val) or str(val).strip() in ['', 'nan', '0', '0.0']:
+        return "-"
+    try:
+        r = int(float(val))
+        if r == 1: return "🏆 1er"
+        if r == 2: return "🥈 2ème"
+        if r == 3: return "🥉 3ème"
+        return f"{r}ème"
+    except:
+        return str(val)
+
+def format_rank_reg(val):
+    if pd.isna(val) or str(val).strip() in ['', 'nan', '0', '0.0']:
+        return "-"
+    try:
+        r = int(float(val))
+        if r == 1: return "🥇 1er"
+        if r == 2: return "🥈 2ème"
+        if r == 3: return "🥉 3ème"
+        return f"{r}ème"
+    except:
+        return str(val)
+
+award_emojis = {
+    'OPOY': '🏈',
+    'DPOY': '🛡️',
+    'COY': '🧢',
+    'WorM': '🪱',
+    'TOY': '🪖',
+    'Playoffs': '🎟️',
+    'PxC': '🎯'
+}
 
 
 # Navigation par onglets
@@ -349,27 +388,17 @@ with tab3:
         
         if not m_awards.empty:
             df_disp_m_awards = m_awards.copy()
-            award_cols = ['OPOY', 'DPOY', 'COY', 'WorM', 'TOY', 'Playoffs', 'PxC']
-            for col in award_cols:
+            
+            for col, emoji in award_emojis.items():
                 if col in df_disp_m_awards.columns:
-                    df_disp_m_awards[col] = df_disp_m_awards[col].apply(lambda x: "🏆" if str(x).strip() in ['1', '1.0'] else "-")
-                    
-            def format_rank(val):
-                if pd.isna(val) or str(val).strip() in ['', 'nan', '0', '0.0']:
-                    return "-"
-                try:
-                    r = int(float(val))
-                    if r == 1: return "🥇 1er"
-                    if r == 2: return "🥈 2ème"
-                    if r == 3: return "🥉 3ème"
-                    return f"{r}ème"
-                except:
-                    return str(val)
+                    df_disp_m_awards[col] = df_disp_m_awards[col].apply(
+                        lambda x: emoji if str(x).strip() in ['1', '1.0', '1.00'] else "-"
+                    )
 
             if 'Playoffs Rank' in df_disp_m_awards.columns:
-                df_disp_m_awards['Playoffs Rank'] = df_disp_m_awards['Playoffs Rank'].apply(format_rank)
+                df_disp_m_awards['Playoffs Rank'] = df_disp_m_awards['Playoffs Rank'].apply(format_rank_playoffs)
             if 'Reg Season Rank' in df_disp_m_awards.columns:
-                df_disp_m_awards['Reg Season Rank'] = df_disp_m_awards['Reg Season Rank'].apply(format_rank)
+                df_disp_m_awards['Reg Season Rank'] = df_disp_m_awards['Reg Season Rank'].apply(format_rank_reg)
 
             rename_awards_prof = {
                 'Year_Clean': 'Saison',
@@ -537,8 +566,8 @@ with tab4:
     # 4. TOPS JOUEURS NFL
     with rec_tab4:
         st.subheader("⭐ Top 20 Performances Individuelles de Joueurs (Titulaires All-Time)")
-        if not df_gamecenter.empty and 'Fantasy Points' in df_gamecenter.columns:
-            top_players = df_gamecenter.sort_values(by='Fantasy Points', ascending=False).head(20).copy()
+        if not df_gc_starters.empty and 'Fantasy Points' in df_gc_starters.columns:
+            top_players = df_gc_starters.sort_values(by='Fantasy Points', ascending=False).head(20).copy()
             
             show_cols_p = ['Player', 'POS', 'Fantasy Points', 'Manager', 'Year_Clean', 'Week_Clean', 'Stats']
             top_players_disp = top_players[[c for c in show_cols_p if c in top_players.columns]].rename(columns={
@@ -550,23 +579,39 @@ with tab4:
         else:
             st.info("Données GameCenter indisponibles.")
 
+        st.markdown("---")
+
+        st.subheader("🛋️ Top 20 Scores de Joueurs Laissés sur le Banc (All-Time)")
+        if not df_gc_bench.empty and 'Fantasy Points' in df_gc_bench.columns:
+            top_bench_players = df_gc_bench.sort_values(by='Fantasy Points', ascending=False).head(20).copy()
+            
+            show_cols_b = ['Player', 'POS', 'Fantasy Points', 'Manager', 'Year_Clean', 'Week_Clean', 'Stats']
+            top_bench_disp = top_bench_players[[c for c in show_cols_b if c in top_bench_players.columns]].rename(columns={
+                'Player': 'Joueur', 'POS': 'POS', 'Fantasy Points': 'Pts Fantasy Laissés sur le Banc', 'Manager': 'Manager Fantasy', 'Year_Clean': 'Saison', 'Week_Clean': 'Semaine', 'Stats': 'Ligne de Stat'
+            })
+            st.dataframe(top_bench_disp, use_container_width=True, hide_index=True, column_config={
+                "Pts Fantasy Laissés sur le Banc": st.column_config.NumberColumn(format="%.2f pts")
+            })
+        else:
+            st.info("Aucun score enregistré sur le banc dans GameCenter.")
+
 # --- ONGLET 5 : GAMECENTER (JOUEURS) ---
 with tab5:
     st.header("⭐ GameCenter - Performances des Joueurs (Titulaires Uniquement)")
     
-    # Filtres interactifs avancés
+    # Filtres interactifs avancés sur la base des titulaires
     gc_col1, gc_col2, gc_col3, gc_col4 = st.columns(4)
     
     with gc_col1:
-        pos_list = ["Toutes"] + sorted([str(p) for p in df_gamecenter['POS'].dropna().unique() if str(p).strip() not in ["", "nan"]])
+        pos_list = ["Toutes"] + sorted([str(p) for p in df_gc_starters['POS'].dropna().unique() if str(p).strip() not in ["", "nan"]])
         selected_pos = st.selectbox("Position (POS) :", pos_list)
         
     with gc_col2:
-        gc_managers = ["Tous"] + sorted([str(m) for m in df_gamecenter['Manager'].dropna().unique() if str(m).strip() not in ["", "nan"]])
+        gc_managers = ["Tous"] + sorted([str(m) for m in df_gc_starters['Manager'].dropna().unique() if str(m).strip() not in ["", "nan"]])
         selected_gc_manager = st.selectbox("Manager Fantasy :", gc_managers, key="gc_manager_select")
         
     with gc_col3:
-        gc_years_list = sorted([y for y in df_gamecenter['Year_Clean'].unique() if y != "0"], reverse=True)
+        gc_years_list = sorted([y for y in df_gc_starters['Year_Clean'].unique() if y != "0"], reverse=True)
         gc_years = ["Toutes"] + gc_years_list
         selected_gc_year = st.selectbox("Saison :", gc_years, key="gc_year_select")
         
@@ -574,7 +619,7 @@ with tab5:
         player_search = st.text_input("Rechercher un joueur :", placeholder="ex: Patrick Mahomes")
         
     # Base filtrée pour les KPIs (recherche, manager, saison)
-    df_kpi_base = df_gamecenter.dropna(subset=['Fantasy Points']).copy()
+    df_kpi_base = df_gc_starters.dropna(subset=['Fantasy Points']).copy()
     
     if selected_gc_manager != "Tous":
         df_kpi_base = df_kpi_base[df_kpi_base['Manager'].astype(str) == selected_gc_manager]
@@ -658,7 +703,7 @@ with tab5:
     st.markdown("---")
     
     # Application de tous les filtres pour le tableau (y compris la position)
-    df_filtered_gc = df_gamecenter.copy()
+    df_filtered_gc = df_gc_starters.copy()
     if selected_pos != "Toutes":
         df_filtered_gc = df_filtered_gc[df_filtered_gc['POS'].astype(str) == selected_pos]
     if selected_gc_manager != "Tous":
@@ -709,27 +754,16 @@ with tab6:
         
     df_display_awards = df_filtered_awards.copy()
     
-    award_cols = ['OPOY', 'DPOY', 'COY', 'WorM', 'TOY', 'Playoffs', 'PxC']
-    for col in award_cols:
+    for col, emoji in award_emojis.items():
         if col in df_display_awards.columns:
-            df_display_awards[col] = df_display_awards[col].apply(lambda x: "🏆" if str(x).strip() in ['1', '1.0'] else "-")
-            
-    def format_rank(val):
-        if pd.isna(val) or str(val).strip() in ['', 'nan', '0', '0.0']:
-            return "-"
-        try:
-            r = int(float(val))
-            if r == 1: return "🥇 1er"
-            if r == 2: return "🥈 2ème"
-            if r == 3: return "🥉 3ème"
-            return f"{r}ème"
-        except:
-            return str(val)
+            df_display_awards[col] = df_display_awards[col].apply(
+                lambda x: emoji if str(x).strip() in ['1', '1.0', '1.00'] else "-"
+            )
 
     if 'Playoffs Rank' in df_display_awards.columns:
-        df_display_awards['Playoffs Rank'] = df_display_awards['Playoffs Rank'].apply(format_rank)
+        df_display_awards['Playoffs Rank'] = df_display_awards['Playoffs Rank'].apply(format_rank_playoffs)
     if 'Reg Season Rank' in df_display_awards.columns:
-        df_display_awards['Reg Season Rank'] = df_display_awards['Reg Season Rank'].apply(format_rank)
+        df_display_awards['Reg Season Rank'] = df_display_awards['Reg Season Rank'].apply(format_rank_reg)
 
     rename_awards = {
         'Year_Clean': 'Saison',
